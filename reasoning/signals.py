@@ -32,6 +32,9 @@ _COIN_KEYWORDS: dict[str, str] = {
     "pol": "POL",
 }
 
+# Phrases that indicate an all-time high question (no dollar amount in the question)
+_ATH_PHRASES = ("all time high", "all-time high", "ath", "new high", "record high")
+
 
 @dataclass
 class PriceTarget:
@@ -41,6 +44,17 @@ class PriceTarget:
     current_usd: float
     gain_needed_pct: float       # (target / current - 1) * 100
     multiple_needed: float       # target / current
+
+
+@dataclass
+class AthContext:
+    """All-time high data for the primary coin in this market."""
+    symbol: str
+    ath_usd: float
+    current_usd: float
+    pct_from_ath: float          # negative = below ATH (e.g. -13.5 means 13.5% below)
+    gain_to_ath_pct: float       # gain needed to reach ATH (positive)
+    is_ath_question: bool        # True when the market question explicitly asks about ATH
 
 
 @dataclass
@@ -65,13 +79,22 @@ class MarketSignals:
     # Spot prices (all tracked coins at scan time)
     spot_prices: dict[str, float] = field(default_factory=dict)
     price_changes_24h: dict[str, float] = field(default_factory=dict)
+    price_changes_7d: dict[str, float] = field(default_factory=dict)
+    market_caps: dict[str, float] = field(default_factory=dict)
 
     # Macro sentiment
     fear_greed_value: int | None = None
     fear_greed_classification: str | None = None
 
-    # Price target (populated only when question references a price level)
+    # Price target (populated when question references a dollar price level)
     price_target: PriceTarget | None = None
+
+    # ATH context (populated when the primary coin is identifiable)
+    ath_context: AthContext | None = None
+
+    # 24h range for the primary coin
+    coin_high_24h: float | None = None
+    coin_low_24h: float | None = None
 
     # Derived momentum: 24h vol as % of average daily vol over market lifetime
     volume_momentum: float | None = None
@@ -83,18 +106,50 @@ def build_signals(
     fear_greed: FearGreedData | None,
 ) -> MarketSignals:
     price_map = {p.symbol: p.price_usd for p in prices}
-    change_map = {p.symbol: p.change_24h for p in prices}
+    change_24h_map = {p.symbol: p.change_24h for p in prices}
+    change_7d_map = {p.symbol: p.change_7d for p in prices if p.change_7d is not None}
+    market_cap_map = {p.symbol: p.market_cap_usd for p in prices if p.market_cap_usd is not None}
 
     days = market.days_to_resolution
 
-    # Volume momentum: ratio of 24h vol to average daily vol over market life
     volume_momentum: float | None = None
     if days is not None and market.volume > 0 and days > 0:
-        # Approximate age: we don't store created_at, so use volume as proxy
-        # If 24h vol > average daily vol → recent surge
         avg_daily = market.volume / max(days, 1)
         if avg_daily > 0:
             volume_momentum = market.volume_24hr / avg_daily
+
+    # Identify the primary coin referenced by this market question
+    q_lower = market.question.lower()
+    primary_symbol: str | None = None
+    for kw, sym in _COIN_KEYWORDS.items():
+        if kw in q_lower:
+            primary_symbol = sym
+            break
+
+    # ATH context and 24h range for the primary coin
+    ath_context: AthContext | None = None
+    coin_high_24h: float | None = None
+    coin_low_24h: float | None = None
+
+    if primary_symbol:
+        primary_price_obj = next((p for p in prices if p.symbol == primary_symbol), None)
+        if primary_price_obj:
+            coin_high_24h = primary_price_obj.high_24h
+            coin_low_24h = primary_price_obj.low_24h
+            if primary_price_obj.ath_usd and primary_price_obj.ath_usd > 0:
+                current = primary_price_obj.price_usd
+                ath = primary_price_obj.ath_usd
+                pct_from_ath = ((current / ath) - 1) * 100   # negative below ATH
+                gain_to_ath = ((ath / current) - 1) * 100    # always positive
+                is_ath_q = any(phrase in q_lower for phrase in _ATH_PHRASES)
+                ath_context = AthContext(
+                    symbol=primary_symbol,
+                    ath_usd=ath,
+                    current_usd=current,
+                    pct_from_ath=pct_from_ath,
+                    gain_to_ath_pct=gain_to_ath,
+                    is_ath_question=is_ath_q,
+                )
 
     signals = MarketSignals(
         market_id=market.id,
@@ -109,9 +164,14 @@ def build_signals(
         taker_fee=market.taker_fee,
         break_even_edge=market.taker_fee,
         spot_prices=price_map,
-        price_changes_24h=change_map,
+        price_changes_24h=change_24h_map,
+        price_changes_7d=change_7d_map,
+        market_caps=market_cap_map,
         fear_greed_value=fear_greed.value if fear_greed else None,
         fear_greed_classification=fear_greed.classification if fear_greed else None,
+        ath_context=ath_context,
+        coin_high_24h=coin_high_24h,
+        coin_low_24h=coin_low_24h,
         volume_momentum=volume_momentum,
     )
 
@@ -126,7 +186,6 @@ def _extract_price_target(question: str, price_map: dict[str, float]) -> PriceTa
     """
     q_lower = question.lower()
 
-    # Identify the coin referenced
     symbol: str | None = None
     for kw, sym in _COIN_KEYWORDS.items():
         if kw in q_lower:

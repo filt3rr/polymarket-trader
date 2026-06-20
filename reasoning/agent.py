@@ -90,10 +90,25 @@ def _build_prompt(signals: MarketSignals) -> str:
 
     if signals.spot_prices:
         lines.append("CRYPTO SPOT PRICES (at scan time)")
+        has_7d = bool(signals.price_changes_7d)
+        has_mcap = bool(signals.market_caps)
         for sym, price in sorted(signals.spot_prices.items()):
-            chg = signals.price_changes_24h.get(sym, 0.0)
-            sign = "+" if chg >= 0 else ""
-            lines.append(f"  {sym:<6}  ${price:>13,.2f}  {sign}{chg:.2f}% (24h)")
+            chg24 = signals.price_changes_24h.get(sym, 0.0)
+            sign24 = "+" if chg24 >= 0 else ""
+            row = f"  {sym:<6}  ${price:>13,.2f}  {sign24}{chg24:.2f}% (24h)"
+            if has_7d and sym in signals.price_changes_7d:
+                chg7 = signals.price_changes_7d[sym]
+                sign7 = "+" if chg7 >= 0 else ""
+                row += f"  {sign7}{chg7:.2f}% (7d)"
+            if has_mcap and sym in signals.market_caps:
+                mcap = signals.market_caps[sym]
+                if mcap >= 1e12:
+                    row += f"  Mkt cap: ${mcap/1e12:.2f}T"
+                elif mcap >= 1e9:
+                    row += f"  Mkt cap: ${mcap/1e9:.1f}B"
+                elif mcap >= 1e6:
+                    row += f"  Mkt cap: ${mcap/1e6:.1f}M"
+            lines.append(row)
         lines.append("")
 
     if signals.fear_greed_value is not None:
@@ -103,17 +118,44 @@ def _build_prompt(signals: MarketSignals) -> str:
         )
         lines.append("")
 
+    if signals.ath_context is not None:
+        ac = signals.ath_context
+        lines.append(f"ALL-TIME HIGH CONTEXT  [{ac.symbol}]")
+        lines.append(f"  All-time high:   ${ac.ath_usd:>13,.2f}")
+        lines.append(f"  Current price:   ${ac.current_usd:>13,.2f}")
+        if ac.pct_from_ath < 0:
+            lines.append(
+                f"  Distance to ATH: {ac.pct_from_ath:.1f}%  "
+                f"(needs +{ac.gain_to_ath_pct:.1f}% to reach ATH)"
+            )
+        else:
+            lines.append(f"  Status:          ABOVE ATH (+{ac.pct_from_ath:.1f}%) — new all-time high territory")
+        if signals.coin_high_24h and signals.coin_low_24h:
+            lines.append(
+                f"  24h range:       ${signals.coin_low_24h:,.2f} – ${signals.coin_high_24h:,.2f}"
+            )
+        if ac.is_ath_question:
+            lines.append(
+                f"  NOTE: This market asks about a NEW all-time high. "
+                f"{ac.symbol} must exceed ${ac.ath_usd:,.2f} to resolve YES."
+            )
+        lines.append("")
+
     if signals.price_target is not None:
         pt = signals.price_target
         lines.append("PRICE TARGET ANALYSIS")
         lines.append(f"  Coin:            {pt.symbol}")
         lines.append(f"  Current price:   ${pt.current_usd:,.2f}")
         lines.append(f"  Target price:    ${pt.target_usd:,.2f}")
-        lines.append(f"  Required gain:   {pt.gain_needed_pct:+.1f}%  ({pt.multiple_needed:.2f}x)")
+        lines.append(f"  Required move:   {pt.gain_needed_pct:+.1f}%  ({pt.multiple_needed:.2f}x)")
         if signals.days_to_resolution:
             lines.append(
                 f"  Time window:     {signals.days_to_resolution:.0f} days "
                 f"({signals.days_to_resolution / 365:.2f} years)"
+            )
+        if signals.coin_high_24h and signals.coin_low_24h and signals.ath_context is None:
+            lines.append(
+                f"  24h range:       ${signals.coin_low_24h:,.2f} – ${signals.coin_high_24h:,.2f}"
             )
         lines.append("")
 

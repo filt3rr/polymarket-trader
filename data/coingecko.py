@@ -42,34 +42,62 @@ class CoinGeckoClient:
         await self._client.aclose()
 
     async def get_prices(self) -> list[CryptoPrice]:
+        """
+        Fetch enriched price data via /coins/markets.
+
+        Returns per coin: spot price, 24h/7d change, market cap,
+        24h high/low, and all-time high — all in a single API call.
+        Previously used /simple/price which only provided spot + 24h change.
+        """
         coin_ids = ",".join(TRACKED_COINS.keys())
         resp = await self._client.get(
-            "/simple/price",
+            "/coins/markets",
             params={
+                "vs_currency": "usd",
                 "ids": coin_ids,
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-                "include_24hr_vol": "true",
+                "order": "market_cap_desc",
+                "per_page": len(TRACKED_COINS),
+                "page": 1,
+                "sparkline": "false",
+                "price_change_percentage": "7d",
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+        coins = resp.json()
         now = datetime.now(tz=timezone.utc)
 
         prices: list[CryptoPrice] = []
-        for coin_id, symbol in TRACKED_COINS.items():
-            if coin_id not in data:
+        for coin in coins:
+            coin_id = coin.get("id", "")
+            symbol = TRACKED_COINS.get(coin_id)
+            if symbol is None:
                 continue
-            d = data[coin_id]
+
+            ath = coin.get("ath")
+            ath_chg = coin.get("ath_change_percentage")
+
             prices.append(
                 CryptoPrice(
                     symbol=symbol,
-                    price_usd=float(d.get("usd", 0)),
-                    change_24h=float(d.get("usd_24h_change", 0)),
-                    volume_24h_usd=float(d.get("usd_24h_vol", 0)),
+                    price_usd=float(coin.get("current_price") or 0),
+                    change_24h=float(coin.get("price_change_percentage_24h") or 0),
+                    change_7d=_safe_float(coin.get("price_change_percentage_7d_in_currency")),
+                    volume_24h_usd=float(coin.get("total_volume") or 0),
+                    market_cap_usd=_safe_float(coin.get("market_cap")),
+                    high_24h=_safe_float(coin.get("high_24h")),
+                    low_24h=_safe_float(coin.get("low_24h")),
+                    ath_usd=_safe_float(ath),
+                    ath_change_pct=_safe_float(ath_chg),
                     scanned_at=now,
                 )
             )
 
-        logger.info("CoinGecko: fetched prices for %d coins", len(prices))
+        logger.info("CoinGecko /coins/markets: fetched enriched data for %d coins", len(prices))
         return prices
+
+
+def _safe_float(val) -> float | None:
+    try:
+        return float(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None

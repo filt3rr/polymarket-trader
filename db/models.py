@@ -70,7 +70,13 @@ class PriceSnapshot(Base):
     symbol = Column(String, nullable=False)
     price_usd = Column(Float)
     change_24h = Column(Float)
+    change_7d = Column(Float)
     volume_24h_usd = Column(Float)
+    market_cap_usd = Column(Float)
+    high_24h = Column(Float)
+    low_24h = Column(Float)
+    ath_usd = Column(Float)
+    ath_change_pct = Column(Float)
     scanned_at = Column(DateTime(timezone=True), nullable=False)
 
 

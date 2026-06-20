@@ -98,7 +98,13 @@ class CryptoPrice(BaseModel):
     symbol: str
     price_usd: float
     change_24h: float
+    change_7d: float | None = None
     volume_24h_usd: float
+    market_cap_usd: float | None = None
+    high_24h: float | None = None
+    low_24h: float | None = None
+    ath_usd: float | None = None
+    ath_change_pct: float | None = None   # negative = below ATH (e.g. -13.5 means 13.5% below)
     scanned_at: datetime
 
 

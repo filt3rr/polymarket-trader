@@ -25,23 +25,37 @@ from reasoning.schemas import ProbabilityEstimate as ProbabilityEstimateSchema
 
 async def migrate_db(engine: AsyncEngine) -> None:
     """
-    Idempotently add Phase 5 columns to paper_positions if they don't exist.
-    SQLite supports ADD COLUMN but not DROP/RENAME, so this is safe to run
-    on every startup against an existing database.
+    Idempotently add new columns to existing tables on startup.
+    SQLite supports ADD COLUMN but not DROP/RENAME — safe to run every startup.
     """
-    new_cols = [
+    position_cols = [
         ("is_live",       "ALTER TABLE paper_positions ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0"),
         ("order_id",      "ALTER TABLE paper_positions ADD COLUMN order_id TEXT"),
         ("order_status",  "ALTER TABLE paper_positions ADD COLUMN order_status TEXT DEFAULT 'SIMULATED'"),
     ]
+    price_cols = [
+        ("change_7d",      "ALTER TABLE price_snapshots ADD COLUMN change_7d REAL"),
+        ("market_cap_usd", "ALTER TABLE price_snapshots ADD COLUMN market_cap_usd REAL"),
+        ("high_24h",       "ALTER TABLE price_snapshots ADD COLUMN high_24h REAL"),
+        ("low_24h",        "ALTER TABLE price_snapshots ADD COLUMN low_24h REAL"),
+        ("ath_usd",        "ALTER TABLE price_snapshots ADD COLUMN ath_usd REAL"),
+        ("ath_change_pct", "ALTER TABLE price_snapshots ADD COLUMN ath_change_pct REAL"),
+    ]
     # Phase 7 tables created via Base.metadata.create_all — no ALTER needed
     async with engine.begin() as conn:
         result = await conn.execute(text("PRAGMA table_info(paper_positions)"))
-        existing = {row[1] for row in result.fetchall()}
-        for col_name, sql in new_cols:
-            if col_name not in existing:
+        existing_pos = {row[1] for row in result.fetchall()}
+        for col_name, sql in position_cols:
+            if col_name not in existing_pos:
                 await conn.execute(text(sql))
                 logger.info("DB migration: added column '%s' to paper_positions", col_name)
+
+        result = await conn.execute(text("PRAGMA table_info(price_snapshots)"))
+        existing_price = {row[1] for row in result.fetchall()}
+        for col_name, sql in price_cols:
+            if col_name not in existing_price:
+                await conn.execute(text(sql))
+                logger.info("DB migration: added column '%s' to price_snapshots", col_name)
 
 
 # ── Market / snapshot writes ──────────────────────────────────────────────────
@@ -104,7 +118,13 @@ async def save_price_snapshots(
                 symbol=p.symbol,
                 price_usd=p.price_usd,
                 change_24h=p.change_24h,
+                change_7d=p.change_7d,
                 volume_24h_usd=p.volume_24h_usd,
+                market_cap_usd=p.market_cap_usd,
+                high_24h=p.high_24h,
+                low_24h=p.low_24h,
+                ath_usd=p.ath_usd,
+                ath_change_pct=p.ath_change_pct,
                 scanned_at=p.scanned_at,
             )
         )
