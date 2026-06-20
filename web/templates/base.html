@@ -75,6 +75,27 @@
     /* Live mode banner */
     .live-banner { background: #431407; border-bottom: 1px solid #ea580c; color: #fed7aa; font-size: 12px; font-weight: 600; text-align: center; padding: 7px 16px; letter-spacing: 0.04em; }
     .live-banner span { color: #fb923c; }
+    /* Trading halted banner */
+    .halt-banner { background: #450a0a; border-bottom: 1px solid #ef4444; color: #fca5a5; font-size: 12px; font-weight: 600; text-align: center; padding: 7px 16px; letter-spacing: 0.04em; }
+    .halt-banner span { color: #f87171; }
+    /* Nav health pill */
+    .nav-health { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-right: 8px; align-self: center; }
+    .nav-health-ok { background: #14532d; color: #4ade80; }
+    .nav-health-halt { background: #450a0a; color: #f87171; animation: pulse 1.5s infinite; }
+    /* Health status grid */
+    .health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+    .health-item { display: flex; align-items: flex-start; gap: 9px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 9px 12px; }
+    .health-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 3px; flex-shrink: 0; }
+    .health-dot-UP { background: #22c55e; }
+    .health-dot-DOWN { background: #ef4444; animation: pulse 1.5s infinite; }
+    .health-dot-DEGRADED { background: #f59e0b; }
+    .health-dot-UNKNOWN { background: #94a3b8; }
+    .health-dot-NA { background: #cbd5e1; }
+    .health-name { font-size: 12px; font-weight: 600; color: #0f172a; }
+    .health-detail { font-size: 11px; color: #64748b; margin-top: 1px; line-height: 1.4; }
+    .health-badge-required { font-size: 10px; font-weight: 600; color: #92400e; background: #fef3c7; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
+    .health-cat-header { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #94a3b8; margin: 10px 0 6px; }
+    .health-cat-header:first-child { margin-top: 0; }
 
     /* F&G bar */
     .fg-bar { height: 8px; border-radius: 4px; background: linear-gradient(to right, #dc2626, #f59e0b, #16a34a); position: relative; margin: 8px 0 4px; }
@@ -121,8 +142,17 @@
   <a href="/positions" {% if request.url.path == "/positions" %}class="active"{% endif %}>Positions</a>
   <a href="/calibration" {% if request.url.path == "/calibration" %}class="active"{% endif %}>Calibration</a>
   <a href="/config" {% if request.url.path == "/config" %}class="active"{% endif %}>Config</a>
+  <span class="nav-health {% if trading_halted %}nav-health-halt{% else %}nav-health-ok{% endif %}">
+    {% if trading_halted %}⛔ HALTED{% else %}● OPERATIONAL{% endif %}
+  </span>
   <span class="nav-badge {% if is_live %}badge-live{% endif %}">{{ trading_mode }}</span>
 </nav>
+{% if trading_halted %}
+<div class="halt-banner">
+  ⛔ TRADING HALTED &nbsp;·&nbsp; Required component(s) down: <span>{{ halt_reasons | join(', ') }}</span>
+  &nbsp;·&nbsp; New positions will not open until resolved.
+</div>
+{% endif %}
 {% if is_live %}
 <div class="live-banner">
   ⚠ LIVE TRADING ACTIVE &nbsp;·&nbsp; Wallet: <span>{{ wallet_address_masked }}</span>

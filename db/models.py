@@ -169,3 +169,35 @@ class PaperPosition(Base):
     payout_usdc = Column(Float)      # num_shares * 1.0 if won, else 0.0
     pnl_usdc = Column(Float)         # payout_usdc - stake_usdc
     closed_at = Column(DateTime(timezone=True))
+
+
+class ComponentHealth(Base):
+    """
+    Phase 7 — Latest health status per system component.
+    One row per component, upserted on every health check run.
+    """
+
+    __tablename__ = "component_health"
+
+    component = Column(String, primary_key=True)   # e.g. "database", "gamma_api"
+    display_name = Column(String, nullable=False)
+    category = Column(String, nullable=False)      # required | data | jobs | model | live
+    status = Column(String, nullable=False)        # UP | DOWN | DEGRADED | UNKNOWN | N/A
+    detail = Column(Text)
+    required = Column(Boolean, default=False)
+    latency_ms = Column(Float)
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class BalanceSnapshot(Base):
+    """
+    Phase 7 — On-chain wallet balance history (live mode only).
+    Recorded on each health check when wallet is connected.
+    """
+
+    __tablename__ = "balance_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    usdc_balance = Column(Float, nullable=False)
+    pol_balance = Column(Float, nullable=False)
+    recorded_at = Column(DateTime(timezone=True), nullable=False, default=_now)

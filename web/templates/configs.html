@@ -231,6 +231,61 @@
   </table>
 </div>
 
+<!-- Telegram Alerts -->
+<div class="card">
+  <div class="card-title">Telegram Alerts</div>
+  {% if settings.telegram_bot_token and settings.telegram_chat_id %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+    <span class="badge badge-filled">Connected</span>
+    <span style="font-size:13px; color:#1e293b;">Alerts enabled — bot token and chat ID configured.</span>
+  </div>
+  <table style="max-width:600px;">
+    <tbody>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; width:220px;">Bot Token</td>
+        <td class="num" style="font-size:13px; color:#64748b;">****{{ settings.telegram_bot_token[-6:] }}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px;">Chat ID</td>
+        <td class="num" style="font-size:13px; color:#64748b;">{{ settings.telegram_chat_id }}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px;">Position Alerts</td>
+        <td><span class="badge {% if settings.telegram_alert_positions %}badge-filled{% else %}badge-cancelled{% endif %}">{{ 'ON' if settings.telegram_alert_positions else 'OFF' }}</span></td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px;">Health Alerts</td>
+        <td><span class="badge {% if settings.telegram_alert_health %}badge-filled{% else %}badge-cancelled{% endif %}">{{ 'ON' if settings.telegram_alert_health else 'OFF' }}</span></td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px;">Daily Summary</td>
+        <td><span class="badge {% if settings.telegram_daily_summary %}badge-filled{% else %}badge-cancelled{% endif %}">{{ 'ON (08:00 UTC)' if settings.telegram_daily_summary else 'OFF' }}</span></td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <div class="section-hint" style="margin-bottom:14px;">
+    <strong>Not configured.</strong> Add the following to your <code>.env</code> file and restart the server:
+  </div>
+  <table style="max-width:680px;">
+    <tbody>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap; width:240px;"><code>TELEGRAM_BOT_TOKEN</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;">Token from <a href="https://t.me/BotFather" target="_blank" style="color:#2563eb;">@BotFather</a> on Telegram</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap;"><code>TELEGRAM_CHAT_ID</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;">Your chat/user ID — message your bot then visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code></td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="section-hint" style="margin-top:12px; margin-bottom:0;">
+    <strong>Alert types:</strong> New positions · Resolution outcomes (WIN/LOSS) · Circuit breaker trips ·
+    Component failures &amp; recovery · Low wallet balance (live mode) · Daily P&amp;L summary (08:00 UTC)
+  </div>
+  {% endif %}
+</div>
+
 <!-- Live Trading Section -->
 <div class="card">
   <div class="card-title">Live Trading</div>

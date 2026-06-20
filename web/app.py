@@ -118,13 +118,17 @@ DB = Annotated[AsyncSession, Depends(_get_session)]
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _trading_context() -> dict:
-    from server import get_executor, get_wallet_state
+    from server import get_executor, get_wallet_state, get_health_monitor
     executor = get_executor()
+    hm = get_health_monitor()
+    halted = hm.is_trading_halted()
     return {
         "trading_mode": executor.mode_label,
         "is_live": executor.is_live,
         "wallet_address_masked": executor.wallet_address_masked,
         "wallet_state": get_wallet_state(),
+        "trading_halted": halted,
+        "halt_reasons": hm.get_halt_reasons() if halted else [],
     }
 
 
@@ -140,7 +144,7 @@ def _clamp(value, lo, hi):
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, _: Auth, session: DB):
-    from server import get_risk_engine
+    from server import get_risk_engine, get_health_monitor
     prices = await queries.get_latest_prices(session)
     sentiment = await queries.get_latest_sentiment(session)
     opportunities = await queries.get_active_opportunities(session)
@@ -148,6 +152,7 @@ async def dashboard(request: Request, _: Auth, session: DB):
     stats = await queries.get_calibration_stats(session)
     last_scan = await queries.get_last_scan_time(session)
     risk_status = await get_risk_engine().get_status(session)
+    health_statuses = get_health_monitor().get_statuses()
 
     return _templates.TemplateResponse(
         "dashboard.html",
@@ -160,6 +165,8 @@ async def dashboard(request: Request, _: Auth, session: DB):
             "stats": stats,
             "last_scan": last_scan,
             "risk_status": risk_status,
+            "health_statuses": health_statuses,
+            "settings": _settings,
             **_trading_context(),
         },
     )
@@ -294,7 +301,18 @@ async def api_wallet(_: Auth):
 
 @router.get("/api/risk", include_in_schema=False)
 async def api_risk(_: Auth, session: DB):
-    """Risk snapshot polled by dashboard JS."""
     from server import get_risk_engine
     status = await get_risk_engine().get_status(session)
     return JSONResponse(status)
+
+
+@router.get("/api/health", include_in_schema=False)
+async def api_health(_: Auth):
+    """System health snapshot polled by dashboard JS every 30s."""
+    from server import get_health_monitor
+    hm = get_health_monitor()
+    return JSONResponse({
+        "halted": hm.is_trading_halted(),
+        "halt_reasons": hm.get_halt_reasons(),
+        "statuses": hm.get_statuses(),
+    })

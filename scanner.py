@@ -16,6 +16,7 @@ from reasoning.schemas import ProbabilityEstimate, TradeSignal
 from reasoning.agent import ProbabilityAgent
 from trading.executor import TradeExecutor
 from risk.engine import RiskEngine
+from notifications.telegram import TelegramAlerter
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ class MarketScanner:
         )
         self._executor = TradeExecutor(settings)
         self._risk = RiskEngine(settings)
+        self._alerter = TelegramAlerter(settings.telegram_bot_token, settings.telegram_chat_id)
+        self._health_monitor = None   # set by server.py after HealthMonitor init
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -125,8 +128,16 @@ class MarketScanner:
                         row = await queries.save_probability_estimate(session, est)
                         estimate_rows.append((est, row))
 
-        # ── 4. Execute positions for new opportunities ────────────────────────
-        if estimate_rows:
+        # ── 4. Health gate — skip execution if required component is down ─────
+        if self._health_monitor and self._health_monitor.is_trading_halted():
+            reasons = self._health_monitor.get_halt_reasons()
+            logger.warning(
+                "Trading HALTED by health monitor: %s", ", ".join(reasons)
+            )
+
+        # ── 5. Execute positions for new opportunities ────────────────────────
+        trading_ok = not (self._health_monitor and self._health_monitor.is_trading_halted())
+        if estimate_rows and trading_ok:
             async with self._session_factory() as session:
                 existing_market_ids = await queries.get_open_position_market_ids(session)
 
@@ -188,6 +199,15 @@ class MarketScanner:
                     exec_result.stake_usdc,
                     risk_result.kelly_f_full,
                 )
+                if self._settings.telegram_alert_positions:
+                    await self._alerter.alert_new_position(
+                        direction=exec_result.direction,
+                        question=market.question,
+                        stake=exec_result.stake_usdc,
+                        edge=est.trade_edge,
+                        kelly_f=risk_result.kelly_f_used,
+                        mode=self._executor.mode_label,
+                    )
 
             if new_pos_count:
                 logger.info("Opened %d new position(s) [%s].", new_pos_count, self._executor.mode_label)

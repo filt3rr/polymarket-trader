@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 from data.models import CryptoPrice, FearGreedData, GammaMarket
 from db.models import (
+    BalanceSnapshot,
+    ComponentHealth,
     Market,
     MarketSnapshot,
     PaperPosition,
@@ -32,6 +34,7 @@ async def migrate_db(engine: AsyncEngine) -> None:
         ("order_id",      "ALTER TABLE paper_positions ADD COLUMN order_id TEXT"),
         ("order_status",  "ALTER TABLE paper_positions ADD COLUMN order_status TEXT DEFAULT 'SIMULATED'"),
     ]
+    # Phase 7 tables created via Base.metadata.create_all — no ALTER needed
     async with engine.begin() as conn:
         result = await conn.execute(text("PRAGMA table_info(paper_positions)"))
         existing = {row[1] for row in result.fetchall()}
@@ -678,3 +681,83 @@ async def get_recent_snapshots(
 async def get_known_market_ids(session: AsyncSession) -> set[str]:
     result = await session.execute(select(Market.id))
     return set(result.scalars().all())
+
+
+# ── Phase 7 — Health + balance queries ───────────────────────────────────────
+
+async def get_recent_estimate_count(session: AsyncSession, hours: int = 24) -> int:
+    """Count of LLM estimates generated in the last N hours."""
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=hours)
+    result = await session.execute(
+        select(func.count(ProbabilityEstimate.id))
+        .where(ProbabilityEstimate.estimated_at >= cutoff)
+    )
+    return result.scalar_one() or 0
+
+
+async def upsert_component_health(session: AsyncSession, status: dict) -> None:
+    """Upsert one health status row (one row per component name)."""
+    existing = await session.get(ComponentHealth, status["name"])
+    now = datetime.now(tz=timezone.utc)
+    if existing:
+        existing.display_name = status["display_name"]
+        existing.category = status["category"]
+        existing.status = status["status"]
+        existing.detail = status["detail"]
+        existing.required = status.get("required", False)
+        existing.latency_ms = status.get("latency_ms")
+        existing.checked_at = now
+    else:
+        session.add(ComponentHealth(
+            component=status["name"],
+            display_name=status["display_name"],
+            category=status["category"],
+            status=status["status"],
+            detail=status["detail"],
+            required=status.get("required", False),
+            latency_ms=status.get("latency_ms"),
+            checked_at=now,
+        ))
+
+
+async def get_component_health(session: AsyncSession) -> list[ComponentHealth]:
+    """All component health rows, ordered by category then name."""
+    result = await session.execute(
+        select(ComponentHealth).order_by(ComponentHealth.category, ComponentHealth.component)
+    )
+    return list(result.scalars().all())
+
+
+async def save_balance_snapshot(
+    session: AsyncSession, usdc: float, pol: float
+) -> None:
+    session.add(BalanceSnapshot(
+        usdc_balance=usdc,
+        pol_balance=pol,
+        recorded_at=datetime.now(tz=timezone.utc),
+    ))
+
+
+async def get_balance_snapshot_24h_ago(session: AsyncSession) -> float | None:
+    """USDC balance closest to 24 hours ago, for delta display."""
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    result = await session.execute(
+        select(BalanceSnapshot.usdc_balance)
+        .where(BalanceSnapshot.recorded_at <= cutoff)
+        .order_by(BalanceSnapshot.recorded_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_balance_history(
+    session: AsyncSession, hours: int = 48
+) -> list[BalanceSnapshot]:
+    """Recent balance snapshots for charting."""
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=hours)
+    result = await session.execute(
+        select(BalanceSnapshot)
+        .where(BalanceSnapshot.recorded_at >= cutoff)
+        .order_by(BalanceSnapshot.recorded_at.asc())
+    )
+    return list(result.scalars().all())

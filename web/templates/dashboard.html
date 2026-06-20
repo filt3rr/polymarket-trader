@@ -111,6 +111,59 @@
   </div>
 </div>
 
+<!-- System Health -->
+<div class="card" id="health-card">
+  <div class="card-title">
+    <span class="live-dot" id="health-dot" style="background:{% if trading_halted %}#ef4444{% else %}#22c55e{% endif %};"></span>
+    System Health
+    <span style="font-size:10px; color:#94a3b8; margin-left:8px; font-weight:400; text-transform:none;">updates every 30s</span>
+    {% if trading_halted %}
+    <span style="margin-left:12px; font-size:11px; color:#ef4444; font-weight:700;">TRADING HALTED — {{ halt_reasons|join(', ') }}</span>
+    {% else %}
+    <span style="margin-left:12px; font-size:11px; color:#22c55e; font-weight:600;">All systems operational</span>
+    {% endif %}
+  </div>
+
+  {% if health_statuses %}
+  {% set categories = [
+    ("required", "Required Components"),
+    ("data",     "Data Pipelines"),
+    ("jobs",     "Background Jobs"),
+    ("model",    "Model & Risk Engine"),
+    ("live",     "Live Trading / On-Chain"),
+  ] %}
+  {% for cat_key, cat_label in categories %}
+  {% set cat_items = health_statuses | selectattr("category", "equalto", cat_key) | list %}
+  {% if cat_items %}
+  <div class="health-cat-header">{{ cat_label }}</div>
+  <div class="health-grid" style="margin-bottom:8px;">
+    {% for s in cat_items %}
+    <div class="health-item" id="hitem-{{ s.name }}">
+      <div class="health-dot health-dot-{{ s.status }}"></div>
+      <div>
+        <div class="health-name">
+          {{ s.display_name }}
+          {% if s.required and s.status == 'DOWN' %}<span class="health-badge-required">REQUIRED</span>{% endif %}
+        </div>
+        <div class="health-detail">
+          <span class="badge badge-{% if s.status == 'UP' %}filled{% elif s.status == 'DOWN' %}cancelled{% elif s.status == 'DEGRADED' %}pending{% else %}hold{% endif %}" style="font-size:10px; padding:1px 5px; margin-right:4px;">{{ s.status }}</span>
+          {{ s.detail }}
+          {% if s.latency_ms %}&nbsp;· {{ s.latency_ms|int }}ms{% endif %}
+        </div>
+        {% if s.checked_at %}
+        <div style="font-size:10px; color:#cbd5e1; margin-top:2px;">checked {{ s.checked_at }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+  {% else %}
+  <p class="empty">Health check running… refresh in {{ settings.health_check_interval_minutes if settings else 5 }} seconds.</p>
+  {% endif %}
+</div>
+
 <!-- Active Opportunities -->
 <div class="card">
   <div class="card-title">Active Opportunities (last 24h)</div>
@@ -341,6 +394,40 @@
     pollWallet();
     setInterval(pollWallet, 60000);
   }
+
+  // ── System health polling ────────────────────────────────────────────────
+  var _statusMap = { UP:'filled', DOWN:'cancelled', DEGRADED:'pending', UNKNOWN:'hold', 'N/A':'hold' };
+  function pollHealth() {
+    fetch('/api/health')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) return;
+        // Overall dot + halted span
+        var dot = document.getElementById('health-dot');
+        if (dot) dot.style.background = d.halted ? '#ef4444' : '#22c55e';
+
+        // Update each component item
+        (d.statuses || []).forEach(function(s) {
+          var el = document.getElementById('hitem-' + s.name);
+          if (!el) return;
+          // Dot
+          var dotEl = el.querySelector('.health-dot');
+          if (dotEl) {
+            dotEl.className = 'health-dot health-dot-' + s.status;
+          }
+          // Detail text
+          var detailEl = el.querySelector('.health-detail');
+          if (detailEl) {
+            var badgeCls = _statusMap[s.status] || 'hold';
+            var latency = s.latency_ms ? ' · ' + Math.round(s.latency_ms) + 'ms' : '';
+            detailEl.innerHTML = '<span class="badge badge-' + badgeCls + '" style="font-size:10px;padding:1px 5px;margin-right:4px;">' + s.status + '</span>' + esc(s.detail) + latency;
+          }
+        });
+      })
+      .catch(function() {});
+  }
+  pollHealth();
+  setInterval(pollHealth, 30000);
 
   // ── Risk status polling ──────────────────────────────────────────────────
   function pollRisk() {

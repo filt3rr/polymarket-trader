@@ -57,8 +57,9 @@ def _parse_outcome(market_data: dict) -> float | None:
 
 
 class ResolutionChecker:
-    def __init__(self, session_factory: async_sessionmaker) -> None:
+    def __init__(self, session_factory: async_sessionmaker, alerter=None) -> None:
         self._session_factory = session_factory
+        self._alerter = alerter  # TelegramAlerter | None
 
     async def run(self) -> None:
         async with self._session_factory() as session:
@@ -92,18 +93,28 @@ class ResolutionChecker:
                             session, position.market_id, outcome, resolved_at
                         )
 
-                direction_won = (
+                won = (
                     (position.direction == "YES" and outcome == 1.0)
                     or (position.direction == "NO" and outcome == 0.0)
                 )
-                result_label = "WIN" if direction_won else "LOSS"
+                pnl = (position.num_shares if won else 0.0) - position.stake_usdc
+                result_label = "WIN" if won else "LOSS"
+                outcome_str = "YES" if outcome == 1.0 else "NO"
                 logger.info(
-                    "Resolved %s [%s direction=%s outcome=%.0f]",
+                    "Resolved %s [%s direction=%s outcome=%s pnl=$%.2f]",
                     position.question[:60],
                     result_label,
                     position.direction,
-                    outcome,
+                    outcome_str,
+                    pnl,
                 )
+                if self._alerter:
+                    await self._alerter.alert_position_resolved(
+                        direction=position.direction,
+                        question=position.question,
+                        pnl=pnl,
+                        outcome_str=outcome_str,
+                    )
                 resolved_count += 1
 
         logger.info("Resolution check complete: %d positions resolved.", resolved_count)

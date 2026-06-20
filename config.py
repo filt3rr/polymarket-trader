@@ -86,6 +86,25 @@ class Settings(BaseSettings):
     # Hard cap per position regardless of Kelly output.
     max_position_size_usd: float = 50.0
 
+    # ── Phase 7 — Telegram alerts ─────────────────────────────────────────────
+    # Get token from @BotFather, chat_id from getUpdates after messaging the bot.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # Alert on new position opens (True/False)
+    telegram_alert_positions: bool = True
+    # Alert when any required component goes DOWN
+    telegram_alert_health: bool = True
+    # Daily summary — sent at 08:00 UTC
+    telegram_daily_summary: bool = True
+
+    # Phase 7 — Health monitor
+    health_check_interval_minutes: int = 5
+
+    # Phase 7 — Balance monitoring (live mode)
+    # Send Telegram alert when USDC drops below this value. 0 = disabled.
+    min_usdc_alert_usd: float = 20.0
+
     # ── Web UI ───────────────────────────────────────────────────────────────
     web_username: str = "admin"
     web_password: str = "changeme"

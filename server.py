@@ -19,6 +19,8 @@ from config import get_settings
 from scanner import MarketScanner
 from jobs.resolution import ResolutionChecker
 from jobs.fill_monitor import FillMonitor
+from jobs.health_monitor import HealthMonitor
+from notifications.telegram import TelegramAlerter
 
 _settings = get_settings()
 
@@ -70,6 +72,7 @@ logger = logging.getLogger(__name__)
 
 _scanner: MarketScanner | None = None
 _scheduler: AsyncIOScheduler | None = None
+_health_monitor: HealthMonitor | None = None
 
 # Cached wallet state refreshed on each scan — served to dashboard JS
 _wallet_state: dict | None = None
@@ -77,17 +80,26 @@ _wallet_state: dict | None = None
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _scanner, _scheduler, _wallet_state
+    global _scanner, _scheduler, _health_monitor, _wallet_state
 
     _scanner = MarketScanner(_settings)
     await _scanner.init_db()
 
-    resolution_checker = ResolutionChecker(_scanner._session_factory)
+    _alerter = TelegramAlerter(_settings.telegram_bot_token, _settings.telegram_chat_id)
+
+    resolution_checker = ResolutionChecker(_scanner._session_factory, alerter=_alerter)
     fill_monitor = FillMonitor(
         session_factory=_scanner._session_factory,
         clob_executor=_scanner._executor._clob,
         timeout_minutes=_settings.live_order_timeout_minutes,
     )
+    _health_monitor = HealthMonitor(
+        session_factory=_scanner._session_factory,
+        settings=_settings,
+        alerter=_alerter,
+        executor=_scanner._executor,
+    )
+    _scanner._health_monitor = _health_monitor
 
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
@@ -114,6 +126,24 @@ async def _lifespan(app: FastAPI):
         max_instances=1,
         misfire_grace_time=30,
     )
+    _scheduler.add_job(
+        _health_monitor.run,
+        trigger=IntervalTrigger(minutes=_settings.health_check_interval_minutes),
+        id="health_monitor",
+        name="Health Monitor",
+        max_instances=1,
+        misfire_grace_time=30,
+    )
+    # Daily summary at 08:00 UTC
+    if _settings.telegram_daily_summary:
+        from apscheduler.triggers.cron import CronTrigger
+        _scheduler.add_job(
+            _send_daily_summary,
+            trigger=CronTrigger(hour=8, minute=0, timezone="UTC"),
+            id="daily_summary",
+            name="Daily Telegram Summary",
+            max_instances=1,
+        )
     _scheduler.start()
     logger.info(
         "Scheduler started — scan every %dmin, resolution every %dmin, fill monitor every %dmin  [mode=%s]",
@@ -136,6 +166,7 @@ async def _lifespan(app: FastAPI):
             )
 
     asyncio.create_task(_scanner.scan())
+    asyncio.create_task(_health_monitor.run())   # initial health check at startup
     if not _settings.paper_trading:
         asyncio.create_task(_refresh_wallet())
 
@@ -176,6 +207,35 @@ def get_risk_engine():
     if _scanner is None:
         raise RuntimeError("Scanner not initialised")
     return _scanner._risk
+
+
+def get_health_monitor() -> HealthMonitor:
+    if _health_monitor is None:
+        raise RuntimeError("Health monitor not initialised")
+    return _health_monitor
+
+
+async def _send_daily_summary() -> None:
+    if _scanner is None or _health_monitor is None:
+        return
+    try:
+        from db import queries
+        from risk.engine import RiskEngine
+        alerter = TelegramAlerter(_settings.telegram_bot_token, _settings.telegram_chat_id)
+        engine = RiskEngine(_settings)
+        async with _scanner._session_factory() as session:
+            stats = await queries.get_calibration_stats(session)
+            unrealized = await queries.get_total_unrealized_pnl(session)
+            open_count = await queries.get_open_position_count(session)
+        await alerter.alert_daily_summary(
+            realized_pnl=stats["net_paper_pnl"] or 0.0,
+            unrealized_pnl=unrealized,
+            open_count=open_count,
+            win_count=stats["win_count"],
+            loss_count=stats["loss_count"],
+        )
+    except Exception as exc:
+        logger.warning("Daily summary failed: %s", exc)
 
 
 def get_wallet_state() -> dict | None:
