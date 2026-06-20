@@ -27,6 +27,16 @@ from notifications.telegram import TelegramAlerter
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """SQLite returns naive datetimes; attach UTC so subtraction works."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # Categories for grouping in the UI
 _CAT_REQUIRED = "required"
 _CAT_DATA = "data"
@@ -170,7 +180,7 @@ class HealthMonitor:
             # Also check DB freshness
             from db import queries
             async with self._session_factory() as session:
-                last = await queries.get_last_scan_time(session)
+                last = _ensure_utc(await queries.get_last_scan_time(session))
 
             stale_threshold = timedelta(minutes=self._settings.scan_interval_minutes * 2.5)
             if last is None:
@@ -219,6 +229,7 @@ class HealthMonitor:
                 return _status_entry("llm_anthropic", "Anthropic LLM", _CAT_REQUIRED,
                                      _DOWN, "ANTHROPIC_API_KEY not configured", required=True)
 
+            last_est = _ensure_utc(last_est)
             if last_est is None:
                 status, detail = _UNKNOWN, "No estimates yet — will confirm on first scan"
             else:
@@ -241,7 +252,7 @@ class HealthMonitor:
         try:
             from db import queries
             async with self._session_factory() as session:
-                last = await queries.get_last_scan_time(session)
+                last = _ensure_utc(await queries.get_last_scan_time(session))
 
             if last is None:
                 return _status_entry("scanner_job", "Scanner Job", _CAT_JOBS,
@@ -270,6 +281,7 @@ class HealthMonitor:
                 last = result.scalar_one_or_none()
 
             ms = (time.perf_counter() - t0) * 1000
+            last = _ensure_utc(last)
             if last is None:
                 return _status_entry("coingecko", "CoinGecko API", _CAT_DATA,
                                      _UNKNOWN, "No price data yet")
@@ -291,6 +303,7 @@ class HealthMonitor:
                 result = await session.execute(select(func.max(SentimentSnapshot.scanned_at)))
                 last = result.scalar_one_or_none()
 
+            last = _ensure_utc(last)
             if last is None:
                 return _status_entry("fear_greed", "Fear & Greed", _CAT_DATA,
                                      _UNKNOWN, "No sentiment data yet")
@@ -313,6 +326,7 @@ class HealthMonitor:
                 )
                 last_close = result.scalar_one_or_none()
 
+            last_close = _ensure_utc(last_close)
             if last_close is None:
                 return _status_entry("resolution_checker", "Resolution Checker", _CAT_JOBS,
                                      _UP, f"Running every {self._settings.resolution_check_interval_minutes}m — no resolutions yet")
