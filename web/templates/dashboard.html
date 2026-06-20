@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Polymarket Trader{% endblock %}
+{% block content %}
+
+<div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; margin-bottom:20px; gap:8px;">
+  <h1 class="page-title" style="margin-bottom:0;">Dashboard</h1>
+  <span class="text-slate" style="font-size:12px;">
+    Last scan: {{ last_scan.strftime('%Y-%m-%d %H:%M UTC') if last_scan else 'No scans yet' }}
+    &nbsp;|&nbsp; Auto-refresh: 60s
+  </span>
+</div>
+
+<!-- Summary stats -->
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-label">Opportunities</div>
+    <div class="stat-value {% if opportunities|length > 0 %}blue{% endif %}">{{ opportunities|length }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Open Positions</div>
+    <div class="stat-value">{{ open_positions|length }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Closed Trades</div>
+    <div class="stat-value">{{ stats.total_paper_trades }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Net P&L (paper)</div>
+    <div class="stat-value {% if stats.net_paper_pnl > 0 %}green{% elif stats.net_paper_pnl < 0 %}red{% endif %}">
+      {% if stats.net_paper_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(stats.net_paper_pnl) }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Win Rate</div>
+    <div class="stat-value {% if stats.win_rate and stats.win_rate >= 50 %}green{% elif stats.win_rate %}red{% endif %}">
+      {{ "%.0f%%"|format(stats.win_rate) if stats.win_rate is not none else "N/A" }}
+    </div>
+  </div>
+</div>
+
+<!-- Active Opportunities -->
+<div class="card">
+  <div class="card-title">Active Opportunities (last 24h)</div>
+  {% if opportunities %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>Model</th>
+          <th>Market</th>
+          <th>Trade Edge</th>
+          <th>CI 90%</th>
+          <th>Question</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in opportunities %}
+        <tr>
+          <td>
+            <span class="badge {% if e.signal == 'BUY_YES' %}badge-yes{% elif e.signal == 'BUY_NO' %}badge-no{% else %}badge-hold{% endif %}">
+              {{ e.signal }}
+            </span>
+          </td>
+          <td class="num">{{ "%.1f%%"|format(e.model_probability * 100) }}</td>
+          <td class="num">{{ "%.1f%%"|format(e.implied_probability * 100) }}</td>
+          {% set display_edge = -(e.net_edge + 2 * e.taker_fee) if e.signal == 'BUY_NO' else e.net_edge %}
+          <td class="num {% if display_edge > 0 %}text-green{% else %}text-red{% endif %}">
+            {{ "%+.1f%%"|format(display_edge * 100) }}
+          </td>
+          <td class="num text-slate">{{ "%.0f%%"|format(e.confidence_low * 100) }}–{{ "%.0f%%"|format(e.confidence_high * 100) }}</td>
+          <td class="wrap">{{ e.question }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No opportunities flagged in the last 24 hours.</p>
+  {% endif %}
+</div>
+
+<!-- Open Positions (live P&L via JS) -->
+<div class="card">
+  <div class="card-title">
+    <span class="live-dot"></span>Open Paper Positions
+    <span style="font-size:10px; color:#94a3b8; margin-left:8px; font-weight:400; text-transform:none;">P&L updates every 15s</span>
+  </div>
+  {% if open_positions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Dir</th>
+          <th>Fill</th>
+          <th>Shares</th>
+          <th>Stake</th>
+          <th>Model %</th>
+          <th>Mkt %</th>
+          <th>Edge</th>
+          <th>Unreal. P&L</th>
+          <th>Opened</th>
+          <th>Question</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in open_positions %}
+        <tr id="pos-{{ p.id }}">
+          <td><span class="badge {% if p.direction == 'YES' %}badge-yes{% else %}badge-no{% endif %}">{{ p.direction }}</span></td>
+          <td class="num">${{ "%.3f"|format(p.fill_price) }}</td>
+          <td class="num">{{ "%.1f"|format(p.num_shares) }}</td>
+          <td class="num">${{ "%.2f"|format(p.stake_usdc) }}</td>
+          <td class="num">{{ "%.1f%%"|format(p.model_probability * 100) if p.model_probability else "—" }}</td>
+          <td class="num">{{ "%.1f%%"|format(p.implied_probability * 100) if p.implied_probability else "—" }}</td>
+          <td class="num {% if p.trade_edge and p.trade_edge > 0 %}text-green{% elif p.trade_edge %}text-red{% endif %}">
+            {{ "%+.1f%%"|format(p.trade_edge * 100) if p.trade_edge else "—" }}
+          </td>
+          <td class="num live-pnl {% if p.unrealized_pnl > 0 %}text-green{% elif p.unrealized_pnl < 0 %}text-red{% endif %}">
+            {% if p.unrealized_pnl >= 0 %}+${% else %}-${% endif %}{{ "%.2f"|format(p.unrealized_pnl|abs) }}
+          </td>
+          <td class="text-slate">{{ p.opened_at }}</td>
+          <td class="wrap">{{ p.question }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No open positions.</p>
+  {% endif %}
+</div>
+
+<!-- Prices + Sentiment -->
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">
+      <span class="live-dot"></span>Spot Prices
+      <span style="font-size:10px; color:#94a3b8; margin-left:8px; font-weight:400; text-transform:none;">updates every 30s</span>
+    </div>
+    {% if prices %}
+    <table id="price-table">
+      <thead><tr><th>Symbol</th><th class="text-right">Price</th><th class="text-right">24h</th></tr></thead>
+      <tbody>
+        {% for p in prices|sort(attribute='price_usd', reverse=True) %}
+        <tr data-symbol="{{ p.symbol }}">
+          <td><strong>{{ p.symbol }}</strong></td>
+          <td class="num text-right price-val">${{ "{:,.2f}".format(p.price_usd) }}</td>
+          <td class="num text-right price-chg {% if p.change_24h >= 0 %}text-green{% else %}text-red{% endif %}">
+            {{ "%+.2f%%"|format(p.change_24h) }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No price data yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Fear & Greed Index</div>
+    {% if sentiment %}
+    <div style="text-align:center; padding: 12px 0 8px;">
+      <div style="font-size:48px; font-weight:700; color:#0f172a; font-variant-numeric:tabular-nums;">
+        {{ sentiment.fear_greed_value }}
+      </div>
+      <div style="font-size:15px; color:#64748b; margin-top:4px;">{{ sentiment.fear_greed_classification }}</div>
+    </div>
+    <div class="fg-bar">
+      <div class="fg-marker" style="left:{{ sentiment.fear_greed_value }}%;"></div>
+    </div>
+    <div style="display:flex; justify-content:space-between; font-size:11px; color:#94a3b8; margin-top:2px;">
+      <span>Fear</span><span>Greed</span>
+    </div>
+    <div style="margin-top:12px; font-size:12px; color:#64748b;">
+      Updated {{ sentiment.scanned_at.strftime('%Y-%m-%d %H:%M UTC') }}
+    </div>
+    {% else %}
+    <p class="empty">No sentiment data yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Live Agent Log -->
+<div class="card">
+  <div class="card-title">
+    <span class="live-dot"></span>Agent &amp; Model Log
+    <span style="font-size:10px; color:#94a3b8; margin-left:8px; font-weight:400; text-transform:none;">live — updates every 3s</span>
+  </div>
+  <div class="log-panel" id="log-box">
+    <div class="log-empty">Waiting for log entries...</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ── HTML escape ──────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // ── Live log polling ─────────────────────────────────────────────────────
+  var logBox = document.getElementById('log-box');
+  function pollLogs() {
+    fetch('/api/logs')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (logs) {
+        if (!logs || !logs.length) return;
+        var html = logs.slice(0, 100).map(function (e) {
+          var cls = 'log-' + e.level;
+          return '<div class="' + cls + '">'
+            + '<span class="log-t">' + esc(e.t) + '</span> '
+            + '<span class="log-src">[' + esc(e.src) + ']</span> '
+            + esc(e.msg)
+            + '</div>';
+        }).join('');
+        logBox.innerHTML = html;
+      })
+      .catch(function () {});
+  }
+  pollLogs();
+  setInterval(pollLogs, 3000);
+
+  // ── Live position P&L polling ────────────────────────────────────────────
+  function pollPositions() {
+    fetch('/api/positions/live')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (positions) {
+        if (!positions) return;
+        positions.forEach(function (p) {
+          var row = document.getElementById('pos-' + p.id);
+          if (!row) return;
+          var pnlCell = row.querySelector('.live-pnl');
+          if (!pnlCell) return;
+          var pnl = p.unrealized_pnl;
+          var abs = Math.abs(pnl).toFixed(2);
+          pnlCell.textContent = (pnl >= 0 ? '+$' : '-$') + abs;
+          pnlCell.className = 'num live-pnl ' + (pnl >= 0 ? 'text-green' : 'text-red');
+        });
+      })
+      .catch(function () {});
+  }
+  if (document.querySelector('[id^="pos-"]')) {
+    pollPositions();
+    setInterval(pollPositions, 15000);
+  }
+
+  // ── Live spot price polling ──────────────────────────────────────────────
+  function pollPrices() {
+    fetch('/api/prices/live')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (prices) {
+        if (!prices) return;
+        prices.forEach(function (p) {
+          var row = document.querySelector('[data-symbol="' + p.symbol + '"]');
+          if (!row) return;
+          var valCell = row.querySelector('.price-val');
+          var chgCell = row.querySelector('.price-chg');
+          if (valCell) valCell.textContent = '$' + p.price_usd.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+          if (chgCell) {
+            chgCell.textContent = (p.change_24h >= 0 ? '+' : '') + p.change_24h.toFixed(2) + '%';
+            chgCell.className = 'num text-right price-chg ' + (p.change_24h >= 0 ? 'text-green' : 'text-red');
+          }
+        });
+      })
+      .catch(function () {});
+  }
+  pollPrices();
+  setInterval(pollPrices, 30000);
+})();
+</script>
+
+{% endblock %}

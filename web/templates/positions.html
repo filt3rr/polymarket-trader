@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Positions — Polymarket Trader{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Paper Positions</h1>
+
+<!-- Summary stats -->
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-label">Open</div>
+    <div class="stat-value blue">{{ open_positions|length }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Closed</div>
+    <div class="stat-value">{{ stats.total_paper_trades }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Wins</div>
+    <div class="stat-value green">{{ stats.win_count }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Losses</div>
+    <div class="stat-value {% if stats.loss_count > 0 %}red{% endif %}">{{ stats.loss_count }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Win Rate</div>
+    <div class="stat-value {% if stats.win_rate and stats.win_rate >= 50 %}green{% elif stats.win_rate %}red{% endif %}">
+      {{ "%.0f%%"|format(stats.win_rate) if stats.win_rate is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Net P&L</div>
+    <div class="stat-value {% if stats.net_paper_pnl > 0 %}green{% elif stats.net_paper_pnl < 0 %}red{% endif %}">
+      {% if stats.net_paper_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(stats.net_paper_pnl) }}
+    </div>
+  </div>
+</div>
+
+<!-- Open positions -->
+<div class="card">
+  <div class="card-title">Open Positions ({{ open_positions|length }})</div>
+  {% if open_positions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Dir</th>
+          <th>Fill</th>
+          <th>Shares</th>
+          <th>Stake</th>
+          <th>Model %</th>
+          <th>Mkt %</th>
+          <th>Edge</th>
+          <th>Opened</th>
+          <th>Question</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in open_positions %}
+        <tr>
+          <td><span class="badge {% if p.direction == 'YES' %}badge-yes{% else %}badge-no{% endif %}">{{ p.direction }}</span></td>
+          <td class="num">${{ "%.3f"|format(p.fill_price) }}</td>
+          <td class="num">{{ "%.1f"|format(p.num_shares) }}</td>
+          <td class="num">${{ "%.2f"|format(p.stake_usdc) }}</td>
+          <td class="num">{{ "%.1f%%"|format(p.model_probability * 100) if p.model_probability else "—" }}</td>
+          <td class="num">{{ "%.1f%%"|format(p.implied_probability * 100) if p.implied_probability else "—" }}</td>
+          <td class="num {% if p.trade_edge and p.trade_edge > 0 %}text-green{% elif p.trade_edge %}text-red{% endif %}">
+            {{ "%+.1f%%"|format(p.trade_edge * 100) if p.trade_edge else "—" }}
+          </td>
+          <td class="text-slate">{{ p.opened_at.strftime('%m-%d %H:%M') }}</td>
+          <td class="wrap">{{ p.question }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No open positions.</p>
+  {% endif %}
+</div>
+
+<!-- Closed positions -->
+<div class="card">
+  <div class="card-title">Closed Positions ({{ closed_positions|length }})</div>
+  {% if closed_positions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Result</th>
+          <th>Dir</th>
+          <th>Fill</th>
+          <th>Stake</th>
+          <th>Payout</th>
+          <th>P&L</th>
+          <th>Outcome</th>
+          <th>Closed</th>
+          <th>Question</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in closed_positions %}
+        {% set won = (p.direction == 'YES' and p.outcome == 1.0) or (p.direction == 'NO' and p.outcome == 0.0) %}
+        <tr>
+          <td><span class="badge {% if won %}badge-win{% else %}badge-loss{% endif %}">{{ 'WIN' if won else 'LOSS' }}</span></td>
+          <td><span class="badge {% if p.direction == 'YES' %}badge-yes{% else %}badge-no{% endif %}">{{ p.direction }}</span></td>
+          <td class="num">${{ "%.3f"|format(p.fill_price) }}</td>
+          <td class="num">${{ "%.2f"|format(p.stake_usdc) }}</td>
+          <td class="num">${{ "%.2f"|format(p.payout_usdc) if p.payout_usdc is not none else "—" }}</td>
+          <td class="num {% if p.pnl_usdc and p.pnl_usdc > 0 %}text-green{% elif p.pnl_usdc %}text-red{% endif %}">
+            {% if p.pnl_usdc is not none %}{{ "%+.2f"|format(p.pnl_usdc) }}{% else %}—{% endif %}
+          </td>
+          <td class="num text-slate">{{ "YES" if p.outcome == 1.0 else "NO" if p.outcome == 0.0 else "—" }}</td>
+          <td class="text-slate">{{ p.closed_at.strftime('%m-%d %H:%M') if p.closed_at else "—" }}</td>
+          <td class="wrap">{{ p.question }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No closed positions yet. Positions close when markets resolve.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

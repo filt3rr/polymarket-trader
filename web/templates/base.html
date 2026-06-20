@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="60">
+  <title>{% block title %}Polymarket Trader{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', -apple-system, sans-serif; font-size: 14px; color: #1e293b; background: #f1f5f9; }
+
+    /* Nav */
+    nav { background: #0f172a; padding: 0 16px; display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+    .nav-brand { color: #fff; font-weight: 700; font-size: 14px; padding: 14px 24px 14px 0; letter-spacing: 0.03em; white-space: nowrap; }
+    .nav-brand span { color: #3b82f6; }
+    nav a { color: #94a3b8; text-decoration: none; font-size: 13px; font-weight: 500; padding: 14px 14px; display: inline-block; }
+    nav a:hover { color: #fff; }
+    nav a.active { color: #fff; border-bottom: 2px solid #3b82f6; }
+    .nav-badge { background: #1e3a5f; color: #60a5fa; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-left: auto; margin-right: 8px; align-self: center; }
+
+    /* Layout */
+    .container { max-width: 1280px; margin: 0 auto; padding: 20px 16px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* Cards */
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin-bottom: 14px; }
+
+    /* Stat row */
+    .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .stat { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; flex: 1; min-width: 120px; }
+    .stat-label { font-size: 11px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+    .stat-value { font-size: 22px; font-weight: 700; color: #0f172a; font-variant-numeric: tabular-nums; }
+    .stat-value.green { color: #16a34a; }
+    .stat-value.red { color: #dc2626; }
+    .stat-value.blue { color: #2563eb; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; padding: 8px 10px 8px 0; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    td { padding: 9px 10px 9px 0; border-bottom: 1px solid #f1f5f9; color: #1e293b; white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+    .num { font-variant-numeric: tabular-nums; font-family: 'SF Mono', 'Fira Code', monospace; }
+    .text-green { color: #16a34a; font-weight: 600; }
+    .text-red { color: #dc2626; font-weight: 600; }
+    .text-slate { color: #64748b; }
+    .text-right { text-align: right; }
+    .wrap { white-space: normal; max-width: 380px; }
+
+    /* Badges */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-yes  { background: #dcfce7; color: #166534; }
+    .badge-no   { background: #fef3c7; color: #92400e; }
+    .badge-hold { background: #f1f5f9; color: #64748b; }
+    .badge-open { background: #dbeafe; color: #1e40af; }
+    .badge-closed { background: #f1f5f9; color: #374151; }
+    .badge-paper { background: #ede9fe; color: #5b21b6; }
+    .badge-win  { background: #dcfce7; color: #166534; }
+    .badge-loss { background: #fee2e2; color: #991b1b; }
+    .badge-outperforming { background: #dcfce7; color: #166534; }
+    .badge-underperforming { background: #fee2e2; color: #991b1b; }
+    .badge-calibrating { background: #fef3c7; color: #92400e; }
+    .badge-on-par { background: #dbeafe; color: #1e40af; }
+
+    /* F&G bar */
+    .fg-bar { height: 8px; border-radius: 4px; background: linear-gradient(to right, #dc2626, #f59e0b, #16a34a); position: relative; margin: 8px 0 4px; }
+    .fg-marker { position: absolute; width: 12px; height: 12px; background: #0f172a; border-radius: 50%; top: -2px; transform: translateX(-50%); }
+
+    /* Log panel */
+    .log-panel { background: #0f172a; border-radius: 6px; padding: 12px 14px; height: 280px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace; font-size: 11.5px; line-height: 1.65; color: #94a3b8; }
+    .log-panel .log-t { color: #475569; user-select: none; }
+    .log-panel .log-src { color: #60a5fa; }
+    .log-panel .log-ERROR { color: #f87171; }
+    .log-panel .log-WARNING { color: #fb923c; }
+    .log-panel .log-DEBUG { color: #4b5563; }
+    .log-empty { color: #334155; font-style: italic; padding: 8px 0; }
+    .live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; margin-right: 6px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* Config form */
+    .config-form input[type=number], .config-form input[type=text] {
+      width: 120px; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
+      font-size: 13px; font-family: 'SF Mono','Fira Code',monospace; color: #0f172a;
+      background: #f8fafc;
+    }
+    .config-form input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+    .config-form .param-row { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid #f1f5f9; flex-wrap: wrap; }
+    .config-form .param-row:last-child { border-bottom: none; }
+    .param-label { font-size: 13px; font-weight: 600; color: #0f172a; min-width: 180px; }
+    .param-desc { font-size: 12px; color: #64748b; flex: 1; }
+    .param-source { font-size: 11px; color: #94a3b8; white-space: nowrap; }
+    .btn-save { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 22px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-save:hover { background: #1d4ed8; }
+
+    /* Misc */
+    .page-title { font-size: 18px; font-weight: 700; color: #0f172a; margin-bottom: 20px; }
+    .empty { color: #94a3b8; font-style: italic; padding: 20px 0; text-align: center; }
+    .reasoning { color: #475569; font-size: 12px; line-height: 1.5; white-space: normal; max-width: 500px; }
+    .section-hint { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #475569; margin-bottom: 14px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="nav-brand">POLYMARKET <span>TRADER</span></span>
+  <a href="/" {% if request.url.path == "/" %}class="active"{% endif %}>Dashboard</a>
+  <a href="/markets" {% if request.url.path == "/markets" %}class="active"{% endif %}>Markets</a>
+  <a href="/positions" {% if request.url.path == "/positions" %}class="active"{% endif %}>Positions</a>
+  <a href="/calibration" {% if request.url.path == "/calibration" %}class="active"{% endif %}>Calibration</a>
+  <a href="/config" {% if request.url.path == "/config" %}class="active"{% endif %}>Config</a>
+  <span class="nav-badge">PAPER</span>
+</nav>
+<div class="container">
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

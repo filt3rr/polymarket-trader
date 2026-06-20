@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Calibration — Polymarket Trader{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Model Calibration</h1>
+
+<!-- Brier score summary -->
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-label">Resolved Predictions</div>
+    <div class="stat-value">{{ stats.total_resolved }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Model Brier Score</div>
+    <div class="stat-value {% if stats.avg_model_brier and stats.avg_model_brier < 0.25 %}green{% elif stats.avg_model_brier %}red{% endif %}">
+      {{ "%.4f"|format(stats.avg_model_brier) if stats.avg_model_brier is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Market Brier Score</div>
+    <div class="stat-value">
+      {{ "%.4f"|format(stats.avg_market_brier) if stats.avg_market_brier is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Edge vs Market</div>
+    {% if stats.avg_model_brier is not none and stats.avg_market_brier is not none %}
+    {% set edge = stats.avg_market_brier - stats.avg_model_brier %}
+    <div class="stat-value {% if edge > 0 %}green{% else %}red{% endif %}">
+      {{ "%+.4f"|format(edge) }}
+    </div>
+    {% else %}
+    <div class="stat-value">N/A</div>
+    {% endif %}
+  </div>
+</div>
+
+<div style="background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:14px 18px; margin-bottom:16px; font-size:13px; color:#475569; line-height:1.6;">
+  <strong style="color:#0f172a;">Brier Score guide:</strong>
+  0.25 = random (coin flip), 0.00 = perfect.
+  A model Brier score below the market score means the model adds predictive value.
+  Needs &ge;20 resolved markets for meaningful calibration.
+</div>
+
+<!-- Recent estimates table -->
+<div class="card">
+  <div class="card-title">Recent Estimates (last 50)</div>
+  {% if estimates %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>Model</th>
+          <th>Market</th>
+          <th>Net Edge</th>
+          <th>Outcome</th>
+          <th>Model BS</th>
+          <th>Mkt BS</th>
+          <th>Estimated</th>
+          <th>Question</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in estimates %}
+        <tr>
+          <td>
+            <span class="badge {% if e.signal == 'BUY_YES' %}badge-yes{% elif e.signal == 'BUY_NO' %}badge-no{% else %}badge-hold{% endif %}">
+              {{ e.signal }}
+            </span>
+          </td>
+          <td class="num">{{ "%.1f%%"|format(e.model_probability * 100) }}</td>
+          <td class="num">{{ "%.1f%%"|format(e.implied_probability * 100) }}</td>
+          {% set cal_edge = -(e.net_edge + 2 * e.taker_fee) if e.signal == 'BUY_NO' else e.net_edge %}
+          <td class="num {% if cal_edge > 0 %}text-green{% else %}text-red{% endif %}">
+            {{ "%+.1f%%"|format(cal_edge * 100) }}
+          </td>
+          <td class="num">
+            {% if e.outcome is not none %}
+              {{ "YES" if e.outcome == 1.0 else "NO" }}
+            {% else %}
+              <span class="text-slate">open</span>
+            {% endif %}
+          </td>
+          <td class="num {% if e.model_brier_score is not none and e.market_brier_score is not none and e.model_brier_score < e.market_brier_score %}text-green{% elif e.model_brier_score is not none %}text-red{% endif %}">
+            {{ "%.4f"|format(e.model_brier_score) if e.model_brier_score is not none else "—" }}
+          </td>
+          <td class="num text-slate">
+            {{ "%.4f"|format(e.market_brier_score) if e.market_brier_score is not none else "—" }}
+          </td>
+          <td class="text-slate">{{ e.estimated_at.strftime('%m-%d %H:%M') }}</td>
+          <td class="wrap">{{ e.question }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No estimates yet. Run a scan to generate predictions.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

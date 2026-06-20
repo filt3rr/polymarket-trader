@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Config — Polymarket Trader{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Strategy Configuration</h1>
+
+<!-- Calibration Summary -->
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-label">Resolved Predictions</div>
+    <div class="stat-value">{{ stats.total_resolved }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Model Brier Score</div>
+    <div class="stat-value {% if stats.avg_model_brier and stats.avg_model_brier < 0.25 %}green{% elif stats.avg_model_brier %}red{% endif %}">
+      {{ "%.4f"|format(stats.avg_model_brier) if stats.avg_model_brier is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Market Brier Score</div>
+    <div class="stat-value">
+      {{ "%.4f"|format(stats.avg_market_brier) if stats.avg_market_brier is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Edge vs Market</div>
+    {% if stats.avg_model_brier is not none and stats.avg_market_brier is not none %}
+    {% set calib_edge = stats.avg_market_brier - stats.avg_model_brier %}
+    <div class="stat-value {% if calib_edge > 0 %}green{% else %}red{% endif %}">
+      {{ "%+.4f"|format(calib_edge) }}
+    </div>
+    {% else %}
+    <div class="stat-value">N/A</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="stat-label">Win Rate</div>
+    <div class="stat-value {% if stats.win_rate and stats.win_rate >= 50 %}green{% elif stats.win_rate %}red{% endif %}">
+      {{ "%.0f%%"|format(stats.win_rate) if stats.win_rate is not none else "N/A" }}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Net P&L</div>
+    <div class="stat-value {% if stats.net_paper_pnl > 0 %}green{% elif stats.net_paper_pnl < 0 %}red{% endif %}">
+      {% if stats.net_paper_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(stats.net_paper_pnl) }}
+    </div>
+  </div>
+</div>
+
+<!-- Auto-Calibration Status -->
+<div class="card">
+  <div class="card-title">Auto-Calibration Status</div>
+  {% set cal_status = overrides.get('calibration_status', '') %}
+  {% set last_check = overrides.get('last_calibration_check', '') %}
+  {% if cal_status %}
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+    <span class="badge badge-{{ cal_status }}">{{ cal_status.upper() }}</span>
+    <span style="font-size:13px; color:#1e293b;">
+      {% if cal_status == 'outperforming' %}
+        Model is consistently below market Brier score — edge is confirmed. No adjustment needed.
+      {% elif cal_status == 'underperforming' %}
+        Model Brier exceeds market Brier — edge threshold has been tightened automatically.
+      {% elif cal_status == 'calibrating' %}
+        Gathering data. Need 15 resolved predictions before auto-calibration activates.
+      {% else %}
+        Model is performing on-par with market consensus.
+      {% endif %}
+    </span>
+  </div>
+  {% if last_check %}
+  <div style="font-size:12px; color:#64748b;">Last checked: {{ last_check[:19].replace('T',' ') }} UTC</div>
+  {% endif %}
+  {% else %}
+  <p class="empty">No auto-calibration data yet. Runs automatically after markets resolve.</p>
+  {% endif %}
+  <div class="section-hint" style="margin-top:12px; margin-bottom:0;">
+    <strong>How it works:</strong> After each market resolution, the model Brier score (last 15 predictions)
+    is compared against the market's own Brier score. If the model consistently underperforms by >0.03,
+    <strong>min_net_edge</strong> is automatically increased by 0.02 (more selective). If the model significantly
+    outperforms and Brier &lt; 0.15, the threshold decreases by 0.01 (captures more opportunities).
+    Manual saves below always take precedence at the next scan.
+  </div>
+</div>
+
+<!-- Editable Strategy Parameters -->
+<div class="card">
+  <div class="card-title">Strategy Parameters</div>
+  <form method="POST" action="/config" class="config-form">
+    {% for key, (label, typ, default, step, desc) in editable_params.items() %}
+    {% set val = effective[key] %}
+    {% set is_overridden = key in overrides %}
+    <div class="param-row">
+      <div class="param-label">{{ label }}</div>
+      <input
+        type="number"
+        name="{{ key }}"
+        value="{{ val }}"
+        step="{{ step }}"
+        {% if key == 'min_net_edge' %}min="0.05" max="0.25"
+        {% elif key == 'max_markets_per_scan' %}min="1" max="50"
+        {% elif key == 'paper_position_size_usd' %}min="1" max="1000"
+        {% elif key == 'min_market_volume' %}min="0"
+        {% elif key == 'scan_interval_minutes' %}min="1" max="1440"
+        {% endif %}
+      >
+      <div class="param-desc">{{ desc }}</div>
+      <div class="param-source">
+        {% if is_overridden %}
+          <span style="color:#2563eb;">overridden</span> <span class="text-slate">(env: {{ default }})</span>
+        {% else %}
+          <span class="text-slate">env default</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    <div style="margin-top:16px; display:flex; align-items:center; gap:16px;">
+      <button type="submit" class="btn-save">Save Changes</button>
+      <span style="font-size:12px; color:#64748b;">
+        Changes take effect on the <strong>next scan</strong>.
+        Scan interval requires a server restart.
+      </span>
+    </div>
+  </form>
+</div>
+
+<!-- System Settings (read-only) -->
+<div class="card">
+  <div class="card-title">System Settings (read-only)</div>
+  <table style="max-width:700px;">
+    <tbody>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px; width:200px;">LLM Model</td>
+        <td class="num" style="padding:7px 0; font-size:13px;">{{ settings.llm_model }}</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Paper Trading</td>
+        <td style="padding:7px 0;">
+          <span class="badge {% if settings.paper_trading %}badge-paper{% else %}badge-loss{% endif %}">
+            {{ 'PAPER MODE' if settings.paper_trading else 'LIVE MODE' }}
+          </span>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Database</td>
+        <td class="num" style="padding:7px 0; font-size:12px; color:#64748b;">{{ settings.database_url }}</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Anthropic Key</td>
+        <td class="num" style="padding:7px 0; font-size:13px; color:#64748b;">{{ '****' + settings.anthropic_api_key[-4:] if settings.anthropic_api_key else 'not set' }}</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">CoinGecko Key</td>
+        <td class="num" style="padding:7px 0; font-size:13px; color:#64748b;">{{ '****' + settings.coingecko_api_key[-4:] if settings.coingecko_api_key else 'not set' }}</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Resolution Check</td>
+        <td style="padding:7px 0; font-size:13px; color:#64748b;">Every {{ settings.resolution_check_interval_minutes }} min</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Config Change Log -->
+{% if config_rows %}
+<div class="card">
+  <div class="card-title">Config Change Log</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+          <th>Updated By</th>
+          <th>When</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in config_rows %}
+        <tr>
+          <td class="num" style="font-size:12px;">{{ row.key }}</td>
+          <td class="num">{{ row.value }}</td>
+          <td>
+            <span class="badge {% if row.updated_by == 'auto-calibration' %}badge-open{% else %}badge-hold{% endif %}">
+              {{ row.updated_by }}
+            </span>
+          </td>
+          <td class="text-slate">{{ row.updated_at.strftime('%m-%d %H:%M') if row.updated_at else '—' }}</td>
+          <td class="text-slate" style="font-size:12px; white-space:normal; max-width:400px;">{{ row.note or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

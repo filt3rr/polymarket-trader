@@ -1,0 +1,10 @@
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+startCommand = "uvicorn server:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+# Volumes: add a volume mounted at /data in the Railway dashboard,
+# then set DATABASE_URL=sqlite+aiosqlite:////data/polymarket_trader.db in env vars.
