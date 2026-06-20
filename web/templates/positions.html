@@ -71,8 +71,13 @@
           <td class="num">${{ "%.2f"|format(p.stake_usdc) }}</td>
           <td class="num">{{ "%.1f%%"|format(p.model_probability * 100) if p.model_probability else "—" }}</td>
           <td class="num">{{ "%.1f%%"|format(p.implied_probability * 100) if p.implied_probability else "—" }}</td>
-          <td class="num {% if p.trade_edge and p.trade_edge > 0 %}text-green{% elif p.trade_edge %}text-red{% endif %}">
-            {{ "%+.1f%%"|format(p.trade_edge * 100) if p.trade_edge else "—" }}
+          {% if p.direction == 'NO' and p.trade_edge is not none and p.trade_edge < 0 %}
+            {% set disp_edge = -(p.trade_edge + 0.04) %}
+          {% else %}
+            {% set disp_edge = p.trade_edge %}
+          {% endif %}
+          <td class="num {% if disp_edge is not none and disp_edge > 0 %}text-green{% elif disp_edge is not none and disp_edge < 0 %}text-red{% endif %}">
+            {{ "%+.1f%%"|format(disp_edge * 100) if disp_edge is not none else "—" }}
           </td>
           <td>
             {% set os = (p.order_status or 'SIMULATED')|lower %}

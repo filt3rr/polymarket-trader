@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
+from data.gamma import _is_non_crypto_contamination
 from db import queries
 
 _settings = get_settings()
@@ -147,7 +148,8 @@ async def dashboard(request: Request, _: Auth, session: DB):
     from server import get_risk_engine, get_health_monitor
     prices = await queries.get_latest_prices(session)
     sentiment = await queries.get_latest_sentiment(session)
-    opportunities = await queries.get_active_opportunities(session)
+    raw_opps = await queries.get_active_opportunities(session)
+    opportunities = [o for o in raw_opps if not _is_non_crypto_contamination(o.question)]
     open_positions = await queries.get_open_positions_with_prices(session)
     stats = await queries.get_calibration_stats(session)
     last_scan = await queries.get_last_scan_time(session)
