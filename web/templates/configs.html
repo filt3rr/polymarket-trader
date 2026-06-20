@@ -82,41 +82,112 @@
   </div>
 </div>
 
+<!-- Risk Status Snapshot -->
+<div class="card">
+  <div class="card-title">
+    <span class="live-dot" style="background:{% if risk_status.circuit_tripped %}#ef4444{% else %}#22c55e{% endif %};"></span>
+    Risk Status
+  </div>
+  {% if risk_status.circuit_tripped %}
+  <div style="background:#450a0a; border:1px solid #ef4444; border-radius:6px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#fca5a5; font-weight:600;">
+    ⛔ CIRCUIT BREAKER TRIPPED — New positions are paused until P&L recovers above -${{ "%.0f"|format(risk_status.circuit_threshold_usd) }}.
+    Reset by increasing the threshold below or by realising gains.
+  </div>
+  {% endif %}
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:6px;">
+    <div class="stat" style="min-width:0;">
+      <div class="stat-label">Total P&L</div>
+      <div class="stat-value {% if risk_status.total_pnl >= 0 %}green{% else %}red{% endif %}" style="font-size:18px;">
+        {% if risk_status.total_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(risk_status.total_pnl) }}
+      </div>
+    </div>
+    <div class="stat" style="min-width:0;">
+      <div class="stat-label">Open / Max</div>
+      <div class="stat-value {% if risk_status.open_positions >= risk_status.max_open_positions %}red{% endif %}" style="font-size:18px;">
+        {{ risk_status.open_positions }} / {{ risk_status.max_open_positions }}
+      </div>
+    </div>
+    <div class="stat" style="min-width:0;">
+      <div class="stat-label">Deployed</div>
+      <div class="stat-value" style="font-size:18px;">${{ "%.0f"|format(risk_status.total_exposure_usd) }}
+        {% if risk_status.max_exposure_usd > 0 %}<span style="font-size:12px; color:#64748b;"> / ${{ "%.0f"|format(risk_status.max_exposure_usd) }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="stat" style="min-width:0;">
+      <div class="stat-label">Kelly Sizing</div>
+      <div class="stat-value" style="font-size:18px;">
+        {% if risk_status.kelly_fraction > 0 %}{{ "%.0f%%"|format(risk_status.kelly_fraction * 100) }}{% else %}OFF{% endif %}
+      </div>
+    </div>
+    <div class="stat" style="min-width:0;">
+      <div class="stat-label">Circuit</div>
+      <div class="stat-value {% if risk_status.circuit_tripped %}red{% elif risk_status.circuit_threshold_usd > 0 %}green{% endif %}" style="font-size:18px;">
+        {% if risk_status.circuit_tripped %}TRIPPED{% elif risk_status.circuit_threshold_usd > 0 %}OK{% else %}OFF{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Editable Strategy Parameters -->
 <div class="card">
   <div class="card-title">Strategy Parameters</div>
-  <form method="POST" action="/config" class="config-form">
-    {% for key, (label, typ, default, step, desc) in editable_params.items() %}
+  <form method="POST" action="/config" class="config-form" id="config-form">
+    {% for key in strategy_keys %}
+    {% if key in editable_params %}
+    {% set entry = editable_params[key] %}
+    {% set label = entry[0] %}{% set typ = entry[1] %}{% set default = entry[2] %}
+    {% set step = entry[3] %}{% set desc = entry[4] %}
+    {% set lo = entry[5] if entry|length > 5 else none %}
+    {% set hi = entry[6] if entry|length > 6 else none %}
     {% set val = effective[key] %}
     {% set is_overridden = key in overrides %}
     <div class="param-row">
       <div class="param-label">{{ label }}</div>
-      <input
-        type="number"
-        name="{{ key }}"
-        value="{{ val }}"
-        step="{{ step }}"
-        {% if key == 'min_net_edge' %}min="0.05" max="0.25"
-        {% elif key == 'max_markets_per_scan' %}min="1" max="50"
-        {% elif key == 'paper_position_size_usd' %}min="1" max="1000"
-        {% elif key == 'min_market_volume' %}min="0"
-        {% elif key == 'scan_interval_minutes' %}min="1" max="1440"
-        {% endif %}
+      <input type="number" name="{{ key }}" value="{{ val }}" step="{{ step }}"
+        {% if lo is not none %}min="{{ lo }}"{% endif %}
+        {% if hi is not none %}max="{{ hi }}"{% endif %}
       >
       <div class="param-desc">{{ desc }}</div>
       <div class="param-source">
-        {% if is_overridden %}
-          <span style="color:#2563eb;">overridden</span> <span class="text-slate">(env: {{ default }})</span>
-        {% else %}
-          <span class="text-slate">env default</span>
-        {% endif %}
+        {% if is_overridden %}<span style="color:#2563eb;">overridden</span> <span class="text-slate">(env: {{ default }})</span>
+        {% else %}<span class="text-slate">env default</span>{% endif %}
       </div>
     </div>
+    {% endif %}
     {% endfor %}
+
+    <!-- Risk parameters in the same form so one submit saves everything -->
+    <div style="margin:18px 0 8px; padding-top:14px; border-top:1px solid #e2e8f0;">
+      <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:#64748b; margin-bottom:10px;">Risk Parameters</div>
+    </div>
+    {% for key in risk_keys %}
+    {% if key in editable_params %}
+    {% set entry = editable_params[key] %}
+    {% set label = entry[0] %}{% set typ = entry[1] %}{% set default = entry[2] %}
+    {% set step = entry[3] %}{% set desc = entry[4] %}
+    {% set lo = entry[5] if entry|length > 5 else none %}
+    {% set hi = entry[6] if entry|length > 6 else none %}
+    {% set val = effective[key] %}
+    {% set is_overridden = key in overrides %}
+    <div class="param-row">
+      <div class="param-label">{{ label }}</div>
+      <input type="number" name="{{ key }}" value="{{ val }}" step="{{ step }}"
+        {% if lo is not none %}min="{{ lo }}"{% endif %}
+        {% if hi is not none %}max="{{ hi }}"{% endif %}
+      >
+      <div class="param-desc">{{ desc }}</div>
+      <div class="param-source">
+        {% if is_overridden %}<span style="color:#2563eb;">overridden</span> <span class="text-slate">(env: {{ default }})</span>
+        {% else %}<span class="text-slate">env default</span>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
     <div style="margin-top:16px; display:flex; align-items:center; gap:16px;">
-      <button type="submit" class="btn-save">Save Changes</button>
+      <button type="submit" class="btn-save">Save All Changes</button>
       <span style="font-size:12px; color:#64748b;">
-        Changes take effect on the <strong>next scan</strong>.
+        Strategy and risk changes take effect on the <strong>next scan</strong>.
         Scan interval requires a server restart.
       </span>
     </div>

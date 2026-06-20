@@ -271,6 +271,78 @@ async def get_open_position_market_ids(session: AsyncSession) -> set[str]:
     return set(result.scalars().all())
 
 
+# ── Phase 6 — Risk queries ────────────────────────────────────────────────────
+
+async def get_open_position_count(session: AsyncSession) -> int:
+    """Count of currently open positions."""
+    result = await session.execute(
+        select(func.count(PaperPosition.id)).where(PaperPosition.status == "OPEN")
+    )
+    return result.scalar_one() or 0
+
+
+async def get_total_open_exposure(session: AsyncSession) -> float:
+    """Sum of stake_usdc across all open positions."""
+    result = await session.execute(
+        select(func.sum(PaperPosition.stake_usdc)).where(PaperPosition.status == "OPEN")
+    )
+    return float(result.scalar_one() or 0.0)
+
+
+async def get_total_unrealized_pnl(session: AsyncSession) -> float:
+    """
+    Approximate unrealized P&L for all open positions using latest market snapshots.
+    Used for circuit breaker calculation.
+    """
+    subq = (
+        select(
+            MarketSnapshot.market_id,
+            func.max(MarketSnapshot.scanned_at).label("latest"),
+        )
+        .group_by(MarketSnapshot.market_id)
+        .subquery()
+    )
+    result = await session.execute(
+        select(PaperPosition, MarketSnapshot.yes_price)
+        .outerjoin(subq, PaperPosition.market_id == subq.c.market_id)
+        .outerjoin(
+            MarketSnapshot,
+            and_(
+                MarketSnapshot.market_id == subq.c.market_id,
+                MarketSnapshot.scanned_at == subq.c.latest,
+            ),
+        )
+        .where(PaperPosition.status == "OPEN")
+    )
+    total = 0.0
+    for pos, yes_price in result.all():
+        if yes_price is None:
+            yes_price = pos.fill_price
+        if pos.direction == "YES":
+            current_value = (pos.num_shares or 0) * yes_price
+        else:
+            current_value = (pos.num_shares or 0) * (1.0 - yes_price)
+        total += current_value - (pos.stake_usdc or 0)
+    return total
+
+
+async def get_open_positions_for_underlying(
+    session: AsyncSession, keywords: list[str]
+) -> int:
+    """Count open positions whose question contains any of the given keywords."""
+    from sqlalchemy import or_
+    if not keywords:
+        return 0
+    conditions = [PaperPosition.question.ilike(f"%{kw}%") for kw in keywords]
+    result = await session.execute(
+        select(func.count(PaperPosition.id)).where(
+            PaperPosition.status == "OPEN",
+            or_(*conditions),
+        )
+    )
+    return result.scalar_one() or 0
+
+
 async def get_closed_positions(
     session: AsyncSession, limit: int = 50
 ) -> list[PaperPosition]:

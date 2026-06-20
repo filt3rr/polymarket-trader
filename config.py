@@ -57,6 +57,35 @@ class Settings(BaseSettings):
     # Fill monitor job cadence (minutes)
     fill_monitor_interval_minutes: int = 5
 
+    # ── Phase 6 — Risk management ─────────────────────────────────────────────
+    # Circuit breaker: pause new positions if total P&L drops below -N USDC.
+    # Set to 0 to disable.
+    drawdown_limit_usd: float = 50.0
+
+    # Max concurrent open positions across the entire portfolio.
+    max_open_positions: int = 10
+
+    # Max total USDC staked across all open positions (0 = no limit).
+    max_exposure_usd: float = 200.0
+
+    # Max positions sharing the same underlying token (BTC, ETH, SOL, …).
+    # Set to 0 to disable.
+    max_positions_per_underlying: int = 2
+
+    # Max bid-ask spread as a fraction of mid-price (0 = disabled).
+    max_spread_pct: float = 0.08
+
+    # Kelly position sizing. kelly_fraction=0.25 = quarter-Kelly (conservative).
+    # Set kelly_fraction=0 to use fixed paper_position_size_usd instead.
+    use_kelly_sizing: bool = True
+    kelly_fraction: float = 0.25
+
+    # Virtual bankroll used for Kelly stake calculation in paper mode.
+    paper_bankroll_usd: float = 1000.0
+
+    # Hard cap per position regardless of Kelly output.
+    max_position_size_usd: float = 50.0
+
     # ── Web UI ───────────────────────────────────────────────────────────────
     web_username: str = "admin"
     web_password: str = "changeme"

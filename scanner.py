@@ -15,6 +15,7 @@ from reasoning.signals import build_signals
 from reasoning.schemas import ProbabilityEstimate, TradeSignal
 from reasoning.agent import ProbabilityAgent
 from trading.executor import TradeExecutor
+from risk.engine import RiskEngine
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class MarketScanner:
             min_net_edge=settings.min_net_edge,
         )
         self._executor = TradeExecutor(settings)
+        self._risk = RiskEngine(settings)
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
@@ -138,7 +140,22 @@ class MarketScanner:
                 if market is None:
                     continue
 
-                exec_result = await self._executor.execute(est, market, effective_position_size)
+                # ── Risk check before execution ────────────────────────────
+                async with self._session_factory() as risk_session:
+                    risk_result = await self._risk.check(
+                        risk_session, est, market, effective_position_size
+                    )
+
+                if not risk_result.approved:
+                    logger.info(
+                        "Risk BLOCKED '%s': %s",
+                        market.question[:50], risk_result.reject_reason,
+                    )
+                    continue
+
+                exec_result = await self._executor.execute(
+                    est, market, risk_result.stake_usdc
+                )
                 if not exec_result.success:
                     logger.error(
                         "Execution failed for '%s': %s",
@@ -163,11 +180,13 @@ class MarketScanner:
                 new_pos_count += 1
                 existing_market_ids.add(est.market_id)
                 logger.info(
-                    "[%s] %s %s @ $%.3f",
+                    "[%s] %s %s @ $%.3f  stake=$%.2f (kelly=%.3f)",
                     self._executor.mode_label,
                     exec_result.direction,
                     market.question[:50],
                     exec_result.fill_price,
+                    exec_result.stake_usdc,
+                    risk_result.kelly_f_full,
                 )
 
             if new_pos_count:

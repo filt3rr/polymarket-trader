@@ -172,6 +172,12 @@ def get_executor():
     return _scanner._executor
 
 
+def get_risk_engine():
+    if _scanner is None:
+        raise RuntimeError("Scanner not initialised")
+    return _scanner._risk
+
+
 def get_wallet_state() -> dict | None:
     return _wallet_state
 

@@ -44,6 +44,73 @@
   {% endif %}
 </div>
 
+<!-- Risk Status -->
+<div class="card" id="risk-card">
+  <div class="card-title">
+    <span class="live-dot" style="background:{% if risk_status.circuit_tripped %}#ef4444{% else %}#22c55e{% endif %};"></span>
+    Risk Monitor
+    <span style="font-size:10px; color:#94a3b8; margin-left:8px; font-weight:400; text-transform:none;">updates every 30s</span>
+  </div>
+
+  {% if risk_status.circuit_tripped %}
+  <div style="background:#450a0a; border:1px solid #ef4444; border-radius:6px; padding:10px 14px; margin-bottom:14px; font-size:13px; color:#fca5a5; font-weight:600;">
+    ⛔ CIRCUIT BREAKER TRIPPED — New positions paused. Total P&L ${{ "%.2f"|format(risk_status.total_pnl) }} ≤ -${{ "%.2f"|format(risk_status.circuit_threshold_usd) }}
+  </div>
+  {% endif %}
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px;">
+    <!-- Total P&L -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+      <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Total P&L</div>
+      <div id="risk-total-pnl" style="font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; color:{% if risk_status.total_pnl >= 0 %}#16a34a{% else %}#dc2626{% endif %};">
+        {% if risk_status.total_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(risk_status.total_pnl) }}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:2px;">realized + unrealized</div>
+    </div>
+
+    <!-- Open Positions -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+      <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Open Positions</div>
+      <div id="risk-open-pos" style="font-size:17px; font-weight:700; color:{% if risk_status.open_positions >= risk_status.max_open_positions %}#dc2626{% else %}#0f172a{% endif %};">
+        {{ risk_status.open_positions }} / {{ risk_status.max_open_positions }}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:2px;">concurrent limit</div>
+    </div>
+
+    <!-- Exposure -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+      <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Deployed Capital</div>
+      <div id="risk-exposure" style="font-size:17px; font-weight:700; font-variant-numeric:tabular-nums; color:#0f172a;">
+        ${{ "%.0f"|format(risk_status.total_exposure_usd) }}
+        {% if risk_status.max_exposure_usd > 0 %}<span style="font-size:12px; font-weight:400; color:#64748b;"> / ${{ "%.0f"|format(risk_status.max_exposure_usd) }}</span>{% endif %}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:2px;">USDC staked (open)</div>
+    </div>
+
+    <!-- Kelly -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+      <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Kelly Sizing</div>
+      <div style="font-size:17px; font-weight:700; color:#0f172a;">
+        {% if risk_status.kelly_fraction > 0 %}{{ "%.0f%%"|format(risk_status.kelly_fraction * 100) }} Kelly{% else %}Fixed{% endif %}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+        {% if risk_status.kelly_fraction > 0 %}bankroll ${{ "%.0f"|format(risk_status.paper_bankroll_usd) }} · cap ${{ "%.0f"|format(risk_status.max_position_size_usd) }}{% else %}base size{% endif %}
+      </div>
+    </div>
+
+    <!-- Circuit Breaker -->
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+      <div style="font-size:10px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Circuit Breaker</div>
+      <div id="risk-circuit" style="font-size:15px; font-weight:700; color:{% if risk_status.circuit_tripped %}#dc2626{% elif risk_status.circuit_threshold_usd > 0 %}#16a34a{% else %}#94a3b8{% endif %};">
+        {% if risk_status.circuit_tripped %}TRIPPED{% elif risk_status.circuit_threshold_usd > 0 %}OK{% else %}Disabled{% endif %}
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+        {% if risk_status.circuit_threshold_usd > 0 %}threshold -${{ "%.0f"|format(risk_status.circuit_threshold_usd) }}{% else %}set in Config{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Active Opportunities -->
 <div class="card">
   <div class="card-title">Active Opportunities (last 24h)</div>
@@ -274,6 +341,57 @@
     pollWallet();
     setInterval(pollWallet, 60000);
   }
+
+  // ── Risk status polling ──────────────────────────────────────────────────
+  function pollRisk() {
+    fetch('/api/risk')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) return;
+
+        // Total P&L
+        var pnlEl = document.getElementById('risk-total-pnl');
+        if (pnlEl) {
+          var pnl = d.total_pnl;
+          pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+          pnlEl.style.color = pnl >= 0 ? '#16a34a' : '#dc2626';
+        }
+
+        // Open positions
+        var posEl = document.getElementById('risk-open-pos');
+        if (posEl) {
+          posEl.textContent = d.open_positions + ' / ' + d.max_open_positions;
+          posEl.style.color = d.open_positions >= d.max_open_positions ? '#dc2626' : '#0f172a';
+        }
+
+        // Exposure
+        var expEl = document.getElementById('risk-exposure');
+        if (expEl) {
+          var expText = '$' + Math.round(d.total_exposure_usd);
+          if (d.max_exposure_usd > 0) expText += ' / $' + Math.round(d.max_exposure_usd);
+          expEl.textContent = expText;
+        }
+
+        // Circuit breaker
+        var cbEl = document.getElementById('risk-circuit');
+        if (cbEl) {
+          if (d.circuit_tripped) {
+            cbEl.textContent = 'TRIPPED';
+            cbEl.style.color = '#dc2626';
+          } else if (d.circuit_threshold_usd > 0) {
+            cbEl.textContent = 'OK';
+            cbEl.style.color = '#16a34a';
+          }
+        }
+
+        // Dot colour
+        var dot = document.querySelector('#risk-card .live-dot');
+        if (dot) dot.style.background = d.circuit_tripped ? '#ef4444' : '#22c55e';
+      })
+      .catch(function() {});
+  }
+  pollRisk();
+  setInterval(pollRisk, 30000);
 
   // ── Live spot price polling ──────────────────────────────────────────────
   function pollPrices() {
