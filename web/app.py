@@ -31,8 +31,8 @@ _EDITABLE_PARAMS: dict[str, tuple] = {
         0.05, 0.25,
     ),
     "max_markets_per_scan": (
-        "Max Markets / Scan", int, 10, "1",
-        "Number of top-volume markets sent to the LLM per scan",
+        "Max Markets / Scan", int, 15, "1",
+        "Markets evaluated per scan — includes 1 guaranteed slot per coin for diversity",
         1, 50,
     ),
     "paper_position_size_usd": (

@@ -22,6 +22,70 @@ logger = logging.getLogger(__name__)
 
 _COL_WIDTH = 76
 
+# Maps question keywords → display symbol (mirrors reasoning/signals.py)
+_COIN_KW: dict[str, str] = {
+    "bitcoin": "BTC", "btc": "BTC",
+    "ethereum": "ETH", "eth": "ETH",
+    "solana": "SOL", "sol": "SOL",
+    "xrp": "XRP", "ripple": "XRP",
+    "bnb": "BNB",
+    "doge": "DOGE", "dogecoin": "DOGE",
+    "cardano": "ADA", "ada": "ADA",
+    "chainlink": "LINK", "link": "LINK",
+    "avalanche": "AVAX", "avax": "AVAX",
+    "polygon": "POL", "pol": "POL",
+}
+
+
+def _market_coin(question: str) -> str | None:
+    q = question.lower()
+    for kw, sym in _COIN_KW.items():
+        if kw in q:
+            return sym
+    return None
+
+
+def _diverse_candidates(markets: list[GammaMarket], max_n: int) -> list[GammaMarket]:
+    """
+    Select up to max_n markets ensuring at least one per identified coin.
+
+    Step 1: for each coin, take its single highest-volume market (guaranteed slot).
+    Step 2: fill remaining slots with the highest-volume markets not yet selected.
+    Step 3: sort final set by volume descending for evaluation order.
+
+    Without this, BTC markets saturate all slots because they dominate by volume.
+    """
+    by_coin: dict[str, list[GammaMarket]] = {}
+    for m in markets:
+        coin = _market_coin(m.question)
+        bucket = coin if coin else "_other"
+        by_coin.setdefault(bucket, []).append(m)
+
+    selected: list[GammaMarket] = []
+    selected_ids: set[str] = set()
+
+    # Guaranteed one slot per coin (highest-volume market for that coin)
+    for coin in sorted(by_coin):
+        if len(selected) >= max_n:
+            break
+        best = max(by_coin[coin], key=lambda m: m.volume)
+        if best.id not in selected_ids:
+            selected.append(best)
+            selected_ids.add(best.id)
+
+    # Fill remaining slots with next-highest-volume markets overall
+    remaining = sorted(
+        [m for m in markets if m.id not in selected_ids],
+        key=lambda m: m.volume, reverse=True,
+    )
+    for m in remaining:
+        if len(selected) >= max_n:
+            break
+        selected.append(m)
+        selected_ids.add(m.id)
+
+    return sorted(selected, key=lambda m: m.volume, reverse=True)
+
 
 class MarketScanner:
     def __init__(self, settings: Settings) -> None:
@@ -112,9 +176,16 @@ class MarketScanner:
         estimates: list[ProbabilityEstimate] = []
         estimate_rows = []
         if markets and self._settings.anthropic_api_key:
-            candidates = sorted(markets, key=lambda m: m.volume, reverse=True)
-            candidates = candidates[:effective_max_markets]
-            logger.info("Running probability model on %d markets...", len(candidates))
+            candidates = _diverse_candidates(markets, effective_max_markets)
+            coin_counts: dict[str, int] = {}
+            for m in candidates:
+                c = _market_coin(m.question) or "other"
+                coin_counts[c] = coin_counts.get(c, 0) + 1
+            logger.info(
+                "Running probability model on %d markets — coin mix: %s",
+                len(candidates),
+                ", ".join(f"{k}:{v}" for k, v in sorted(coin_counts.items())),
+            )
 
             for market in candidates:
                 signals = build_signals(market, prices, fg)

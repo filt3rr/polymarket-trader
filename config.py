@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Probability model
     llm_model: str = "claude-sonnet-4-6"
     min_net_edge: float = 0.10
-    max_markets_per_scan: int = 10
+    max_markets_per_scan: int = 15
 
     # Paper trading
     paper_position_size_usd: float = 10.0
