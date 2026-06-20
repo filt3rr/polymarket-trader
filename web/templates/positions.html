@@ -2,7 +2,7 @@
 {% block title %}Positions — Polymarket Trader{% endblock %}
 {% block content %}
 
-<h1 class="page-title">Paper Positions</h1>
+<h1 class="page-title">Positions</h1>
 
 <!-- Summary stats -->
 <div class="stat-row">
@@ -44,6 +44,7 @@
     <table>
       <thead>
         <tr>
+          <th>Type</th>
           <th>Dir</th>
           <th>Fill</th>
           <th>Shares</th>
@@ -51,6 +52,7 @@
           <th>Model %</th>
           <th>Mkt %</th>
           <th>Edge</th>
+          <th>Order Status</th>
           <th>Opened</th>
           <th>Question</th>
         </tr>
@@ -58,6 +60,11 @@
       <tbody>
         {% for p in open_positions %}
         <tr>
+          <td>
+            <span class="badge {% if p.is_live %}badge-live{% else %}badge-paper{% endif %}">
+              {{ 'LIVE' if p.is_live else 'PAPER' }}
+            </span>
+          </td>
           <td><span class="badge {% if p.direction == 'YES' %}badge-yes{% else %}badge-no{% endif %}">{{ p.direction }}</span></td>
           <td class="num">${{ "%.3f"|format(p.fill_price) }}</td>
           <td class="num">{{ "%.1f"|format(p.num_shares) }}</td>
@@ -66,6 +73,10 @@
           <td class="num">{{ "%.1f%%"|format(p.implied_probability * 100) if p.implied_probability else "—" }}</td>
           <td class="num {% if p.trade_edge and p.trade_edge > 0 %}text-green{% elif p.trade_edge %}text-red{% endif %}">
             {{ "%+.1f%%"|format(p.trade_edge * 100) if p.trade_edge else "—" }}
+          </td>
+          <td>
+            {% set os = (p.order_status or 'SIMULATED')|lower %}
+            <span class="badge badge-{{ os }}">{{ p.order_status or 'SIMULATED' }}</span>
           </td>
           <td class="text-slate">{{ p.opened_at.strftime('%m-%d %H:%M') }}</td>
           <td class="wrap">{{ p.question }}</td>
@@ -88,12 +99,14 @@
       <thead>
         <tr>
           <th>Result</th>
+          <th>Type</th>
           <th>Dir</th>
           <th>Fill</th>
           <th>Stake</th>
           <th>Payout</th>
           <th>P&L</th>
           <th>Outcome</th>
+          <th>Order ID</th>
           <th>Closed</th>
           <th>Question</th>
         </tr>
@@ -103,6 +116,11 @@
         {% set won = (p.direction == 'YES' and p.outcome == 1.0) or (p.direction == 'NO' and p.outcome == 0.0) %}
         <tr>
           <td><span class="badge {% if won %}badge-win{% else %}badge-loss{% endif %}">{{ 'WIN' if won else 'LOSS' }}</span></td>
+          <td>
+            <span class="badge {% if p.is_live %}badge-live{% else %}badge-paper{% endif %}">
+              {{ 'LIVE' if p.is_live else 'PAPER' }}
+            </span>
+          </td>
           <td><span class="badge {% if p.direction == 'YES' %}badge-yes{% else %}badge-no{% endif %}">{{ p.direction }}</span></td>
           <td class="num">${{ "%.3f"|format(p.fill_price) }}</td>
           <td class="num">${{ "%.2f"|format(p.stake_usdc) }}</td>
@@ -111,6 +129,9 @@
             {% if p.pnl_usdc is not none %}{{ "%+.2f"|format(p.pnl_usdc) }}{% else %}—{% endif %}
           </td>
           <td class="num text-slate">{{ "YES" if p.outcome == 1.0 else "NO" if p.outcome == 0.0 else "—" }}</td>
+          <td class="text-slate" style="font-size:11px; max-width:100px; overflow:hidden; text-overflow:ellipsis;">
+            {{ p.order_id[:14] ~ "…" if p.order_id and p.order_id|length > 14 else (p.order_id or "—") }}
+          </td>
           <td class="text-slate">{{ p.closed_at.strftime('%m-%d %H:%M') if p.closed_at else "—" }}</td>
           <td class="wrap">{{ p.question }}</td>
         </tr>

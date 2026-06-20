@@ -11,10 +11,10 @@ from data.sentiment import SentimentClient
 from data.models import CryptoPrice, FearGreedData, GammaMarket, ScanResult
 from db.models import Base
 from db import queries
-from paper.positions import direction_for_estimate, fill_price_for_estimate
 from reasoning.signals import build_signals
 from reasoning.schemas import ProbabilityEstimate, TradeSignal
 from reasoning.agent import ProbabilityAgent
+from trading.executor import TradeExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +33,18 @@ class MarketScanner:
             model=settings.llm_model,
             min_net_edge=settings.min_net_edge,
         )
+        self._executor = TradeExecutor(settings)
 
     async def init_db(self) -> None:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await queries.migrate_db(self._engine)
         logger.info("Database tables created / verified.")
 
     async def scan(self) -> ScanResult:
         scanned_at = datetime.now(tz=timezone.utc)
 
-        # Merge env settings with any runtime config overrides written by user or auto-calibration
+        # Merge env settings with any runtime config overrides
         async with self._session_factory() as _cfg_session:
             overrides = await queries.get_runtime_config(_cfg_session)
         effective_min_edge = float(overrides.get("min_net_edge", self._settings.min_net_edge))
@@ -52,8 +54,9 @@ class MarketScanner:
         self._agent.min_net_edge = effective_min_edge
 
         logger.info(
-            "Scan starting at %s  [edge=%.2f max_mkts=%d stake=$%.0f vol_min=$%.0f]",
+            "Scan starting at %s  [mode=%s edge=%.2f max_mkts=%d stake=$%.0f vol_min=$%.0f]",
             scanned_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            self._executor.mode_label,
             effective_min_edge, effective_max_markets,
             effective_position_size, effective_min_volume,
         )
@@ -102,7 +105,7 @@ class MarketScanner:
 
         # ── 3. Run probability model on top N markets ─────────────────────────
         estimates: list[ProbabilityEstimate] = []
-        estimate_rows = []          # ORM rows with .id for FK linking
+        estimate_rows = []
         if markets and self._settings.anthropic_api_key:
             candidates = sorted(markets, key=lambda m: m.volume, reverse=True)
             candidates = candidates[:effective_max_markets]
@@ -110,7 +113,6 @@ class MarketScanner:
 
             for market in candidates:
                 signals = build_signals(market, prices, fg)
-                # Run sync Anthropic SDK call off the event loop so HTTP stays responsive
                 est = await asyncio.to_thread(self._agent.estimate, signals)
                 estimates.append(est)
                 logger.debug("  %s", est)
@@ -121,40 +123,55 @@ class MarketScanner:
                         row = await queries.save_probability_estimate(session, est)
                         estimate_rows.append((est, row))
 
-        # ── 4. Open paper positions for new opportunities ─────────────────────
-        if self._settings.paper_trading and estimate_rows:
+        # ── 4. Execute positions for new opportunities ────────────────────────
+        if estimate_rows:
             async with self._session_factory() as session:
                 existing_market_ids = await queries.get_open_position_market_ids(session)
 
             new_pos_count = 0
-            async with self._session_factory() as session:
-                async with session.begin():
-                    for est, est_row in estimate_rows:
-                        if not est.is_opportunity:
-                            continue
-                        if est.market_id in existing_market_ids:
-                            continue
-                        market = next((m for m in markets if m.id == est.market_id), None)
-                        if market is None:
-                            continue
-                        direction = direction_for_estimate(est)
-                        fp = fill_price_for_estimate(est, market)
-                        await queries.open_paper_position(
+            for est, est_row in estimate_rows:
+                if not est.is_opportunity:
+                    continue
+                if est.market_id in existing_market_ids:
+                    continue
+                market = next((m for m in markets if m.id == est.market_id), None)
+                if market is None:
+                    continue
+
+                exec_result = await self._executor.execute(est, market, effective_position_size)
+                if not exec_result.success:
+                    logger.error(
+                        "Execution failed for '%s': %s",
+                        market.question[:50], exec_result.error,
+                    )
+                    continue
+
+                async with self._session_factory() as session:
+                    async with session.begin():
+                        await queries.open_position(
                             session,
                             market=market,
                             estimate_row=est_row,
-                            direction=direction,
-                            fill_price=fp,
-                            stake_usdc=effective_position_size,
+                            direction=exec_result.direction,
+                            fill_price=exec_result.fill_price,
+                            num_shares=exec_result.num_shares,
+                            stake_usdc=exec_result.stake_usdc,
+                            is_live=exec_result.is_live,
+                            order_id=exec_result.order_id,
+                            order_status=exec_result.order_status,
                         )
-                        new_pos_count += 1
-                        logger.info(
-                            "Paper position opened: %s %s @ $%.3f",
-                            direction, market.question[:50], fp,
-                        )
+                new_pos_count += 1
+                existing_market_ids.add(est.market_id)
+                logger.info(
+                    "[%s] %s %s @ $%.3f",
+                    self._executor.mode_label,
+                    exec_result.direction,
+                    market.question[:50],
+                    exec_result.fill_price,
+                )
 
             if new_pos_count:
-                logger.info("Opened %d new paper position(s).", new_pos_count)
+                logger.info("Opened %d new position(s) [%s].", new_pos_count, self._executor.mode_label)
 
         result = ScanResult(
             scanned_at=scanned_at,
@@ -171,7 +188,7 @@ class MarketScanner:
         self, result: ScanResult, estimates: list[ProbabilityEstimate]
     ) -> None:
         ts = result.scanned_at.strftime("%Y-%m-%d %H:%M UTC")
-        mode = "PAPER" if self._settings.paper_trading else "LIVE"
+        mode = self._executor.mode_label
         print(f"\n{'=' * _COL_WIDTH}")
         print(f"  POLYMARKET SCAN  {ts}  [{mode}]")
         print(f"{'=' * _COL_WIDTH}")

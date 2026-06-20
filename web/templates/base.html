@@ -60,12 +60,21 @@
     .badge-open { background: #dbeafe; color: #1e40af; }
     .badge-closed { background: #f1f5f9; color: #374151; }
     .badge-paper { background: #ede9fe; color: #5b21b6; }
+    .badge-live { background: #fef3c7; color: #92400e; }
     .badge-win  { background: #dcfce7; color: #166534; }
     .badge-loss { background: #fee2e2; color: #991b1b; }
+    .badge-simulated { background: #f1f5f9; color: #64748b; }
+    .badge-pending  { background: #fef3c7; color: #92400e; }
+    .badge-filled   { background: #dcfce7; color: #166534; }
+    .badge-cancelled { background: #fee2e2; color: #991b1b; }
     .badge-outperforming { background: #dcfce7; color: #166534; }
     .badge-underperforming { background: #fee2e2; color: #991b1b; }
     .badge-calibrating { background: #fef3c7; color: #92400e; }
     .badge-on-par { background: #dbeafe; color: #1e40af; }
+
+    /* Live mode banner */
+    .live-banner { background: #431407; border-bottom: 1px solid #ea580c; color: #fed7aa; font-size: 12px; font-weight: 600; text-align: center; padding: 7px 16px; letter-spacing: 0.04em; }
+    .live-banner span { color: #fb923c; }
 
     /* F&G bar */
     .fg-bar { height: 8px; border-radius: 4px; background: linear-gradient(to right, #dc2626, #f59e0b, #16a34a); position: relative; margin: 8px 0 4px; }
@@ -112,8 +121,14 @@
   <a href="/positions" {% if request.url.path == "/positions" %}class="active"{% endif %}>Positions</a>
   <a href="/calibration" {% if request.url.path == "/calibration" %}class="active"{% endif %}>Calibration</a>
   <a href="/config" {% if request.url.path == "/config" %}class="active"{% endif %}>Config</a>
-  <span class="nav-badge">PAPER</span>
+  <span class="nav-badge {% if is_live %}badge-live{% endif %}">{{ trading_mode }}</span>
 </nav>
+{% if is_live %}
+<div class="live-banner">
+  ⚠ LIVE TRADING ACTIVE &nbsp;·&nbsp; Wallet: <span>{{ wallet_address_masked }}</span>
+  &nbsp;·&nbsp; Real USDC is at risk. Monitor positions closely.
+</div>
+{% endif %}
 <div class="container">
   {% block content %}{% endblock %}
 </div>

@@ -20,14 +20,14 @@ _templates = Jinja2Templates(directory="web/templates")
 
 router = APIRouter()
 
-# Editable parameters exposed on the config page
+# Editable strategy parameters
 _EDITABLE_PARAMS = {
     "min_net_edge": ("Min Edge Threshold", float, 0.10, "0.01",
                      "Minimum model edge required to flag a BUY signal (0.05–0.25)"),
     "max_markets_per_scan": ("Max Markets / Scan", int, 10, "1",
                              "Number of top-volume markets sent to the LLM per scan"),
     "paper_position_size_usd": ("Position Size ($)", float, 10.0, "1",
-                                "USDC staked per paper trade"),
+                                "USDC staked per trade (paper or live)"),
     "min_market_volume": ("Min Market Volume ($)", float, 10_000.0, "1000",
                           "Markets below this lifetime volume are excluded"),
     "scan_interval_minutes": ("Scan Interval (min)", int, 15, "1",
@@ -67,6 +67,20 @@ Auth = Annotated[str, Depends(_require_auth)]
 DB = Annotated[AsyncSession, Depends(_get_session)]
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _trading_context() -> dict:
+    """Injects trading mode + wallet info into every template context."""
+    from server import get_executor, get_wallet_state
+    executor = get_executor()
+    return {
+        "trading_mode": executor.mode_label,
+        "is_live": executor.is_live,
+        "wallet_address_masked": executor.wallet_address_masked,
+        "wallet_state": get_wallet_state(),
+    }
+
+
 # ── Page routes ───────────────────────────────────────────────────────────────
 
 @router.get("/", response_class=HTMLResponse)
@@ -88,7 +102,7 @@ async def dashboard(request: Request, _: Auth, session: DB):
             "open_positions": open_positions,
             "stats": stats,
             "last_scan": last_scan,
-            "paper_trading": _settings.paper_trading,
+            **_trading_context(),
         },
     )
 
@@ -98,7 +112,7 @@ async def markets(request: Request, _: Auth, session: DB):
     rows = await queries.get_markets_with_latest_snapshot(session)
     return _templates.TemplateResponse(
         "markets.html",
-        {"request": request, "rows": rows},
+        {"request": request, "rows": rows, **_trading_context()},
     )
 
 
@@ -114,6 +128,7 @@ async def positions(request: Request, _: Auth, session: DB):
             "open_positions": open_pos,
             "closed_positions": closed_pos,
             "stats": stats,
+            **_trading_context(),
         },
     )
 
@@ -124,7 +139,7 @@ async def calibration(request: Request, _: Auth, session: DB):
     recent = await queries.get_recent_estimates(session, limit=50)
     return _templates.TemplateResponse(
         "calibration.html",
-        {"request": request, "stats": stats, "estimates": recent},
+        {"request": request, "stats": stats, "estimates": recent, **_trading_context()},
     )
 
 
@@ -134,7 +149,6 @@ async def config_page(request: Request, _: Auth, session: DB):
     overrides = await queries.get_runtime_config(session)
     config_rows = await queries.get_all_runtime_configs(session)
 
-    # Build effective values: env default merged with any DB override
     effective = {}
     for key, (label, typ, default, step, desc) in _EDITABLE_PARAMS.items():
         raw = overrides.get(key)
@@ -150,6 +164,7 @@ async def config_page(request: Request, _: Auth, session: DB):
             "editable_params": _EDITABLE_PARAMS,
             "settings": _settings,
             "overrides": overrides,
+            **_trading_context(),
         },
     )
 
@@ -204,3 +219,20 @@ async def api_prices_live(_: Auth, session: DB):
         }
         for p in sorted(prices, key=lambda x: x.price_usd, reverse=True)
     ])
+
+
+@router.get("/api/wallet", include_in_schema=False)
+async def api_wallet(_: Auth):
+    """Live wallet balance — polled by config page JS in live mode."""
+    from server import refresh_wallet_state
+    state = await refresh_wallet_state()
+    if state is None:
+        return JSONResponse({"mode": "PAPER", "connected": False})
+    return JSONResponse({
+        "mode": "LIVE",
+        "connected": True,
+        "address_masked": state["address_masked"],
+        "usdc_balance": state["usdc_balance"],
+        "pol_balance": state["pol_balance"],
+        "clob_connected": state["clob_connected"],
+    })

@@ -1,7 +1,10 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import and_, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
+
+logger = logging.getLogger(__name__)
 
 from data.models import CryptoPrice, FearGreedData, GammaMarket
 from db.models import (
@@ -14,6 +17,28 @@ from db.models import (
     SentimentSnapshot,
 )
 from reasoning.schemas import ProbabilityEstimate as ProbabilityEstimateSchema
+
+
+# ── DB migration (Phase 5 columns) ───────────────────────────────────────────
+
+async def migrate_db(engine: AsyncEngine) -> None:
+    """
+    Idempotently add Phase 5 columns to paper_positions if they don't exist.
+    SQLite supports ADD COLUMN but not DROP/RENAME, so this is safe to run
+    on every startup against an existing database.
+    """
+    new_cols = [
+        ("is_live",       "ALTER TABLE paper_positions ADD COLUMN is_live INTEGER NOT NULL DEFAULT 0"),
+        ("order_id",      "ALTER TABLE paper_positions ADD COLUMN order_id TEXT"),
+        ("order_status",  "ALTER TABLE paper_positions ADD COLUMN order_status TEXT DEFAULT 'SIMULATED'"),
+    ]
+    async with engine.begin() as conn:
+        result = await conn.execute(text("PRAGMA table_info(paper_positions)"))
+        existing = {row[1] for row in result.fetchall()}
+        for col_name, sql in new_cols:
+            if col_name not in existing:
+                await conn.execute(text(sql))
+                logger.info("DB migration: added column '%s' to paper_positions", col_name)
 
 
 # ── Market / snapshot writes ──────────────────────────────────────────────────
@@ -122,15 +147,25 @@ async def save_probability_estimate(
 
 # ── Paper position writes ─────────────────────────────────────────────────────
 
-async def open_paper_position(
+async def open_position(
     session: AsyncSession,
     market: GammaMarket,
     estimate_row: ProbabilityEstimate,
     direction: str,
     fill_price: float,
+    num_shares: float,
     stake_usdc: float,
+    is_live: bool = False,
+    order_id: str | None = None,
+    order_status: str = "SIMULATED",
 ) -> PaperPosition:
-    num_shares = stake_usdc / fill_price
+    """Open a position — paper (is_live=False) or live CLOB (is_live=True)."""
+    taker_fee = estimate_row.taker_fee or 0.02
+    computed_edge = (
+        -(estimate_row.net_edge + 2 * taker_fee)
+        if direction == "NO"
+        else estimate_row.net_edge
+    )
     pos = PaperPosition(
         market_id=market.id,
         estimate_id=estimate_row.id,
@@ -141,12 +176,36 @@ async def open_paper_position(
         stake_usdc=stake_usdc,
         model_probability=estimate_row.model_probability,
         implied_probability=estimate_row.implied_probability,
-        trade_edge=estimate_row.net_edge,
+        trade_edge=computed_edge,
         status="OPEN",
         opened_at=datetime.now(tz=timezone.utc),
+        is_live=is_live,
+        order_id=order_id,
+        order_status=order_status,
     )
     session.add(pos)
     return pos
+
+
+async def update_position_order(
+    session: AsyncSession,
+    position_id: int,
+    order_status: str,
+    actual_fill_price: float | None = None,
+) -> None:
+    """Update order status (and optionally correct fill price) after CLOB fill."""
+    pos = await session.get(PaperPosition, position_id)
+    if pos is None:
+        return
+    pos.order_status = order_status
+    if actual_fill_price is not None and actual_fill_price > 0:
+        old_price = pos.fill_price
+        pos.fill_price = actual_fill_price
+        pos.num_shares = pos.stake_usdc / actual_fill_price
+        logger.info(
+            "Position %d fill price updated %.4f → %.4f",
+            position_id, old_price, actual_fill_price,
+        )
 
 
 async def close_paper_position(
@@ -189,6 +248,18 @@ async def get_open_positions(session: AsyncSession) -> list[PaperPosition]:
         select(PaperPosition)
         .where(PaperPosition.status == "OPEN")
         .order_by(PaperPosition.opened_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_pending_live_positions(session: AsyncSession) -> list[PaperPosition]:
+    """Live positions with PENDING orders — checked by FillMonitor every 5 min."""
+    result = await session.execute(
+        select(PaperPosition).where(
+            PaperPosition.is_live == True,  # noqa: E712
+            PaperPosition.order_status == "PENDING",
+            PaperPosition.status == "OPEN",
+        )
     )
     return list(result.scalars().all())
 
@@ -413,6 +484,14 @@ async def get_open_positions_with_prices(session: AsyncSession) -> list[dict]:
         else:
             current_value = pos.num_shares * (1.0 - yes_price)
         unrealized_pnl = current_value - pos.stake_usdc
+        # Older positions were stored with net_edge instead of directional trade_edge.
+        # Detect and correct: for NO positions, a valid trade_edge is always positive.
+        stored_edge = pos.trade_edge or 0.0
+        taker_fee = 0.02
+        if pos.direction == "NO" and stored_edge <= 0:
+            display_edge = -(stored_edge + 2 * taker_fee)
+        else:
+            display_edge = stored_edge
         rows.append({
             "id": pos.id,
             "direction": pos.direction,
@@ -421,12 +500,15 @@ async def get_open_positions_with_prices(session: AsyncSession) -> list[dict]:
             "stake_usdc": pos.stake_usdc,
             "model_probability": pos.model_probability,
             "implied_probability": pos.implied_probability,
-            "trade_edge": pos.trade_edge,
+            "trade_edge": display_edge,
             "opened_at": pos.opened_at.strftime("%m-%d %H:%M") if pos.opened_at else "",
             "question": pos.question,
             "current_yes": yes_price,
             "current_value": current_value,
             "unrealized_pnl": unrealized_pnl,
+            "is_live": bool(pos.is_live),
+            "order_id": pos.order_id,
+            "order_status": pos.order_status or "SIMULATED",
         })
     return rows
 

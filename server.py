@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from config import get_settings
 from scanner import MarketScanner
 from jobs.resolution import ResolutionChecker
+from jobs.fill_monitor import FillMonitor
 
 _settings = get_settings()
 
@@ -70,15 +71,23 @@ logger = logging.getLogger(__name__)
 _scanner: MarketScanner | None = None
 _scheduler: AsyncIOScheduler | None = None
 
+# Cached wallet state refreshed on each scan — served to dashboard JS
+_wallet_state: dict | None = None
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _scanner, _scheduler
+    global _scanner, _scheduler, _wallet_state
 
     _scanner = MarketScanner(_settings)
     await _scanner.init_db()
 
     resolution_checker = ResolutionChecker(_scanner._session_factory)
+    fill_monitor = FillMonitor(
+        session_factory=_scanner._session_factory,
+        clob_executor=_scanner._executor._clob,
+        timeout_minutes=_settings.live_order_timeout_minutes,
+    )
 
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
@@ -97,15 +106,38 @@ async def _lifespan(app: FastAPI):
         max_instances=1,
         misfire_grace_time=60,
     )
+    _scheduler.add_job(
+        fill_monitor.run,
+        trigger=IntervalTrigger(minutes=_settings.fill_monitor_interval_minutes),
+        id="fill_monitor",
+        name="Fill Monitor",
+        max_instances=1,
+        misfire_grace_time=30,
+    )
     _scheduler.start()
     logger.info(
-        "Scheduler started — scan every %dmin, resolution check every %dmin.",
+        "Scheduler started — scan every %dmin, resolution every %dmin, fill monitor every %dmin  [mode=%s]",
         _settings.scan_interval_minutes,
         _settings.resolution_check_interval_minutes,
+        _settings.fill_monitor_interval_minutes,
+        _scanner._executor.mode_label,
     )
 
-    # Run initial scan in background so the web server starts immediately
+    # Refresh wallet state in background after startup
+    async def _refresh_wallet():
+        global _wallet_state
+        _wallet_state = await _scanner._executor.get_wallet_status()
+        if _wallet_state:
+            logger.info(
+                "Wallet connected: %s  USDC=$%.2f  POL=%.4f",
+                _wallet_state["address_masked"],
+                _wallet_state["usdc_balance"],
+                _wallet_state["pol_balance"],
+            )
+
     asyncio.create_task(_scanner.scan())
+    if not _settings.paper_trading:
+        asyncio.create_task(_refresh_wallet())
 
     yield
 
@@ -113,7 +145,6 @@ async def _lifespan(app: FastAPI):
     logger.info("Scheduler stopped.")
 
 
-# Build the FastAPI app and attach web routes
 app = FastAPI(title="Polymarket Trader", lifespan=_lifespan)
 
 from web.app import router as web_router  # noqa: E402
@@ -122,14 +153,34 @@ app.include_router(web_router)
 
 @app.get("/health", include_in_schema=False)
 async def health():
-    return {"status": "ok", "paper_trading": _settings.paper_trading}
+    return {
+        "status": "ok",
+        "mode": _scanner._executor.mode_label if _scanner else "unknown",
+        "paper_trading": _settings.paper_trading,
+    }
 
 
 def get_session_factory():
-    """Dependency accessor for web routes."""
     if _scanner is None:
         raise RuntimeError("Scanner not initialised")
     return _scanner._session_factory
+
+
+def get_executor():
+    if _scanner is None:
+        raise RuntimeError("Scanner not initialised")
+    return _scanner._executor
+
+
+def get_wallet_state() -> dict | None:
+    return _wallet_state
+
+
+async def refresh_wallet_state() -> dict | None:
+    global _wallet_state
+    if _scanner:
+        _wallet_state = await _scanner._executor.get_wallet_status()
+    return _wallet_state
 
 
 if __name__ == "__main__":

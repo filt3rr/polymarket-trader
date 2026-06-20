@@ -39,7 +39,25 @@ class Settings(BaseSettings):
     # Resolution checker
     resolution_check_interval_minutes: int = 30
 
-    # Web UI
+    # ── Phase 5 — Live execution ──────────────────────────────────────────────
+    # Set PAPER_TRADING=False AND provide POLYGON_PRIVATE_KEY to go live.
+    # The key is a hex private key for a Polygon EOA wallet (0x...).
+    # NEVER commit this value to git — use .env or Railway environment variables.
+    polygon_private_key: str = ""
+
+    # Polygon JSON-RPC endpoint. Public RPC works for dev; use Alchemy/Infura in prod.
+    polygon_rpc_url: str = "https://polygon-rpc.com"
+
+    # Polymarket CLOB API host
+    clob_host: str = "https://clob.polymarket.com"
+
+    # Minutes before a pending live order is cancelled if unfilled
+    live_order_timeout_minutes: int = 10
+
+    # Fill monitor job cadence (minutes)
+    fill_monitor_interval_minutes: int = 5
+
+    # ── Web UI ───────────────────────────────────────────────────────────────
     web_username: str = "admin"
     web_password: str = "changeme"
 

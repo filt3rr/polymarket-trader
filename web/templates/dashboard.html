@@ -25,7 +25,7 @@
     <div class="stat-value">{{ stats.total_paper_trades }}</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Net P&L (paper)</div>
+    <div class="stat-label">Net P&L</div>
     <div class="stat-value {% if stats.net_paper_pnl > 0 %}green{% elif stats.net_paper_pnl < 0 %}red{% endif %}">
       {% if stats.net_paper_pnl >= 0 %}+{% endif %}${{ "%.2f"|format(stats.net_paper_pnl) }}
     </div>
@@ -36,6 +36,12 @@
       {{ "%.0f%%"|format(stats.win_rate) if stats.win_rate is not none else "N/A" }}
     </div>
   </div>
+  {% if is_live and wallet_state %}
+  <div class="stat">
+    <div class="stat-label">Wallet USDC</div>
+    <div class="stat-value" id="wallet-usdc">${{ "%.2f"|format(wallet_state.usdc_balance) }}</div>
+  </div>
+  {% endif %}
 </div>
 
 <!-- Active Opportunities -->
@@ -99,6 +105,7 @@
           <th>Mkt %</th>
           <th>Edge</th>
           <th>Unreal. P&L</th>
+          <th>Order</th>
           <th>Opened</th>
           <th>Question</th>
         </tr>
@@ -117,6 +124,10 @@
           </td>
           <td class="num live-pnl {% if p.unrealized_pnl > 0 %}text-green{% elif p.unrealized_pnl < 0 %}text-red{% endif %}">
             {% if p.unrealized_pnl >= 0 %}+${% else %}-${% endif %}{{ "%.2f"|format(p.unrealized_pnl|abs) }}
+          </td>
+          <td>
+            {% set os = (p.order_status or 'SIMULATED')|lower %}
+            <span class="badge badge-{{ os }}">{{ p.order_status or 'SIMULATED' }}</span>
           </td>
           <td class="text-slate">{{ p.opened_at }}</td>
           <td class="wrap">{{ p.question }}</td>
@@ -246,6 +257,22 @@
   if (document.querySelector('[id^="pos-"]')) {
     pollPositions();
     setInterval(pollPositions, 15000);
+  }
+
+  // ── Live wallet balance polling (live mode only) ─────────────────────────
+  var walletUsdcEl = document.getElementById('wallet-usdc');
+  if (walletUsdcEl) {
+    function pollWallet() {
+      fetch('/api/wallet')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d || !d.connected) return;
+          walletUsdcEl.textContent = '$' + d.usdc_balance.toFixed(2);
+        })
+        .catch(function() {});
+    }
+    pollWallet();
+    setInterval(pollWallet, 60000);
   }
 
   // ── Live spot price polling ──────────────────────────────────────────────

@@ -160,6 +160,107 @@
   </table>
 </div>
 
+<!-- Live Trading Section -->
+<div class="card">
+  <div class="card-title">Live Trading</div>
+  {% if is_live %}
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+    <span class="badge badge-live">LIVE MODE ACTIVE</span>
+    <span style="font-size:12px; color:#92400e; font-weight:600;">Real USDC is being traded on Polymarket.</span>
+  </div>
+  <table style="max-width:600px;" id="wallet-table">
+    <tbody>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px; width:180px;">Wallet Address</td>
+        <td class="num" style="padding:7px 0; font-size:13px;">{{ wallet_address_masked }}</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">USDC Balance</td>
+        <td class="num" style="padding:7px 0; font-size:16px; font-weight:700; color:#0f172a;" id="cfg-usdc">
+          {% if wallet_state %}${{ "%.2f"|format(wallet_state.usdc_balance) }}{% else %}Loading…{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">POL Balance</td>
+        <td class="num" style="padding:7px 0; font-size:13px; color:#475569;" id="cfg-pol">
+          {% if wallet_state %}{{ "%.4f"|format(wallet_state.pol_balance) }} POL{% else %}Loading…{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">CLOB API</td>
+        <td style="padding:7px 0;" id="cfg-clob">
+          {% if wallet_state and wallet_state.clob_connected %}
+          <span class="badge badge-filled">Connected</span>
+          {% else %}
+          <span class="badge badge-cancelled">Disconnected</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Fill Monitor</td>
+        <td style="padding:7px 0; font-size:13px; color:#475569;">Every {{ settings.fill_monitor_interval_minutes }} min</td>
+      </tr>
+      <tr>
+        <td style="padding:7px 16px 7px 0; font-weight:600; color:#475569; font-size:13px;">Order Timeout</td>
+        <td style="padding:7px 0; font-size:13px; color:#475569;">{{ settings.live_order_timeout_minutes }} min</td>
+      </tr>
+    </tbody>
+  </table>
+  <script>
+  (function() {
+    function refreshWallet() {
+      fetch('/api/wallet')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (!d || !d.connected) return;
+          var usdc = document.getElementById('cfg-usdc');
+          var pol  = document.getElementById('cfg-pol');
+          var clob = document.getElementById('cfg-clob');
+          if (usdc) usdc.textContent = '$' + d.usdc_balance.toFixed(2);
+          if (pol)  pol.textContent  = d.pol_balance.toFixed(4) + ' POL';
+          if (clob) clob.innerHTML   = d.clob_connected
+            ? '<span class="badge badge-filled">Connected</span>'
+            : '<span class="badge badge-cancelled">Disconnected</span>';
+        })
+        .catch(function() {});
+    }
+    refreshWallet();
+    setInterval(refreshWallet, 30000);
+  })();
+  </script>
+  {% else %}
+  <div class="section-hint" style="margin-bottom:14px;">
+    <strong>Currently running in PAPER mode.</strong> All trades are simulated — no real funds are moved.
+    To enable live trading, set the following environment variables and restart the server:
+  </div>
+  <table style="max-width:640px;">
+    <tbody>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap; width:220px;"><code>PAPER_TRADING</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;"><code>False</code></td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap;"><code>POLYGON_PRIVATE_KEY</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;">Your Polygon wallet private key (keep secret, never commit to git)</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap;"><code>POLYGON_RPC_URL</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;">Polygon RPC — defaults to <code>https://polygon-rpc.com</code></td>
+      </tr>
+      <tr>
+        <td style="padding:6px 16px 6px 0; font-weight:600; color:#475569; font-size:13px; white-space:nowrap;"><code>LIVE_ORDER_TIMEOUT_MINUTES</code></td>
+        <td style="padding:6px 0; font-size:12px; color:#64748b;">Minutes before an unfilled limit order is cancelled (default: 10)</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="section-hint" style="margin-top:14px; margin-bottom:0; border-left:3px solid #f59e0b; background:#fffbeb;">
+    ⚠ <strong>Risk Warning:</strong> Live trading uses real USDC on the Polygon network.
+    Ensure the model is sufficiently calibrated (≥15 resolved predictions, positive Brier edge)
+    before enabling live mode. Start with a small position size.
+  </div>
+  {% endif %}
+</div>
+
 <!-- Config Change Log -->
 {% if config_rows %}
 <div class="card">

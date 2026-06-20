@@ -134,8 +134,9 @@ class RuntimeConfig(Base):
 
 class PaperPosition(Base):
     """
-    Simulated trade opened when the model flags a BUY_YES or BUY_NO opportunity.
-    Closed when the underlying market resolves.
+    One row per opened position — paper or live.
+    Paper positions: is_live=False, order_id=None, order_status="SIMULATED".
+    Live positions:  is_live=True,  order_id=CLOB order ID, order_status tracks fill lifecycle.
     """
 
     __tablename__ = "paper_positions"
@@ -157,6 +158,11 @@ class PaperPosition(Base):
 
     status = Column(String, nullable=False, default="OPEN")  # OPEN | CLOSED
     opened_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    # Phase 5 — live execution tracking
+    is_live = Column(Boolean, default=False, nullable=False)
+    order_id = Column(String, nullable=True)     # Polymarket CLOB order ID
+    order_status = Column(String, default="SIMULATED")  # SIMULATED|PENDING|FILLED|CANCELLED
 
     # Populated on resolution
     outcome = Column(Float)          # 1.0 = YES resolves, 0.0 = NO resolves
